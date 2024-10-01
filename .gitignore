@@ -1,0 +1,4 @@
+discord_bot.bat
+db/optout.db
+__pycache__
+config.py
