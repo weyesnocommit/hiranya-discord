@@ -36,7 +36,6 @@ class Context():
     last = "Mubaraq"
     count = 0
     k = 6
-    word_array = ["cp", "nigger", "nigga", "child", "children", "pedo", "pedophillia", "epstein", "kkk"]
 
     def __init__(self, size):
         self.size = size
@@ -51,29 +50,15 @@ class Context():
 
     def get(self):
         return [x for x in self.chat_context if x is not None]
-
-    def is_blocked(self, string):
-        result = string
-        for word in self.word_array:
-            pattern = re.compile(re.escape(word), re.IGNORECASE)
-            result = pattern.sub('', result)
-        return result
     
     def to_string(self):
         items = self.get()
         if self.count > 1:
-            # logger.info("HERE ALZO")
-            last_index = (self.index - 1) % self.size
             weights = [2 ** i for i in range(self.count)]
             items = [items[i] for i in random.choices(
                 range(self.count), weights=weights, k=min(self.count, 3))]
             items.append(self.last)
             new_array = [b for b in items if len(b) <= 4*len(self.last)]
-            # logger.info("=====")
-            # logger.info(self.context)
-            # logger.info(items)
-            # logger.info(new_array)
-            # logger.info("=====")
             return ". ".join(list(set([item.capitalize() for item in new_array])))
         else:
             return self.last
