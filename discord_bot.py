@@ -10,7 +10,9 @@ import random
 import json
 from config import *
 from capture_filter import MessageFilter
+from earholer_server import Earholer
 import logging
+import asyncio
 
 logging.basicConfig(
     level=logging.ERROR,
@@ -71,6 +73,8 @@ class DiscordClient(discord.Client):
     pipes = {}
     temp = 1.2
     beam = 4
+    harraq_filter = MessageFilter()
+    _ok_webhooker = []
 
     def __init__(self, intents):
         super().__init__(intents=intents)
@@ -81,7 +85,11 @@ class DiscordClient(discord.Client):
         self.timer_started = False
         self.top_layer = False
         self.markov_layer = False
+        self.earhole = False
+        self.runny_earhole = False
         
+        self.top_layer_blocked = False
+        self.markov_layer_blocked = False
         self.patterns = {
             r'<#\d+>': 'DISCORD_CHANNEL',
             r'<@\d+>': 'DISCORD_MENTION',
@@ -96,24 +104,41 @@ class DiscordClient(discord.Client):
         self.top_layer_context = zmq.Context()
         self.top_layer_socket = self.top_layer_context.socket(zmq.REQ)
         self.top_layer_socket.connect(f"tcp://127.0.0.1:{TOP_LAYER_PORT}")
-        
+        self.earholer_server = Earholer(self.hobalda)       
 
     async def on_thread_join(self, thread):
         await thread.join()
         await thread.send(f"wecloomes mysekf")
         
     async def on_ready(self):
+        
         print(" ===========================================AM READINGSONSS")
         self.ready = True
         self.timer_task.start()
         self.heartbeat_task.start()
+        
         if USERPHONE_CHANNEL:
             await self.get_channel(USERPHONE_CHANNEL).send("HUHHARABIN")
             await self.userphon(self.get_channel(USERPHONE_CHANNEL))
+            
+        asyncio.create_task(self.earhole_task())
+            
 
+    async def earhole_task(self):
+        try:
+            await asyncio.to_thread(self.earholer_server.run)
+        except Exception as e:
+            logger.info(e)
+            self.reset_skype()
         
         
-        
+    def hobalda(self, msg):
+        laxanka = self.gen_0(msg, None, False, True, False)
+        if laxanka is None:
+            return None
+        laxanka = self.gen_1_t5(laxanka)
+        return laxanka
+
         
     # task  o
     async def userphon(self, channel):
@@ -143,44 +168,58 @@ class DiscordClient(discord.Client):
     async def before_timer_task(self):
         await self.wait_until_ready()
     
+    def reset_conn(self, socker, context, port):
+        socker.close()
+        socker = context.socket(zmq.REQ)
+        socker.connect(f"tcp://127.0.0.1:{port}")
+        
+    def ping_socket(self, socket):
+        message = {
+            "text": "hiran",
+            "type": "ping"
+        }
+        
+        socket.setsockopt(zmq.RCVTIMEO, 500)
+        response = self.pack_and_send(socket, message)
+        socket.setsockopt(zmq.RCVTIMEO, 60000)
+        return response
+        
     @tasks.loop(seconds=60)
     async def heartbeat_task(self):
-        try:
-            message = {
-                "text": "hiran",
-                "type": "ping"
-            }
-            
-            self.top_layer_socket.setsockopt(zmq.RCVTIMEO, 500)
-            response = self.pack_and_send(self.top_layer_socket, message)
-            self.top_layer_socket.setsockopt(zmq.RCVTIMEO, 60000)
-            self.top_layer = True
-            logger.info(response)
-        except:
-            self.top_layer = False
-            logger.error("ANTI HEART BEAT TOP LAYER")
-            self.top_layer_socket.close()
-            self.top_layer_socket = self.top_layer_context.socket(zmq.REQ)
-            self.top_layer_socket.connect(f"tcp://127.0.0.1:{TOP_LAYER_PORT}")
-        
-        try:
-            message = {
-                "text": "hiran",
-                "type": "ping"
-            }
-            
-            self.markov_socket.setsockopt(zmq.RCVTIMEO, 500)
-            response = self.pack_and_send(self.markov_socket, message)
-            self.markov_socket.setsockopt(zmq.RCVTIMEO, 60000)
-            self.markov_layer = True
-            logger.info(response)
-        except:
-            self.markov_layer = False
-            logger.error("ANTI HEARTBEAT MARKOV")
-            self.markov_socket.close()
-            self.markov_socket = self.top_layer_context.socket(zmq.REQ)
-            self.markov_socket.connect(f"tcp://127.0.0.1:{MARKOV_PORT}")
-            
+        if not self.top_layer_blocked:
+            try:
+                while self.top_layer_blocked:
+                    logger.info("business monk waiting for a business.")
+                    time.sleep(0.5)
+                self.top_layer_blocked = True
+                response = self.ping_socket(self.top_layer_socket)
+                logger.info(response)
+                self.top_layer = True
+            except:
+                self.top_layer = False
+                self.reset_conn(self.top_layer_socket, self.top_layer_context, TOP_LAYER_PORT)
+                logger.error("ANTI HEART BEAT TOP LAYER")
+            finally:
+                self.top_layer_blocked = False
+
+        self.markov_layer = True
+
+        if not self.markov_layer_blocked:
+            try:
+                while self.markov_layer_blocked:
+                    logger.info("business monk waiting for a business.")
+                    time.sleep(0.5)
+                self.markov_layer_blocked = True
+                response = self.ping_socket(self.markov_socket)
+                logger.info(response)
+                self.markov_layer = True
+            except:
+                self.markov_layer = False
+                self.reset_conn(self.markov_socket, self.markov_context, MARKOV_PORT)
+                logger.error("ANTI HEARTBEAT MARKOV")
+            finally:
+                self.markov_layer_blocked = False
+                
 
         
         
@@ -319,7 +358,8 @@ class DiscordClient(discord.Client):
     def gen_1_t5(self, text: str):
         if not self.top_layer:
             return text
-        logger.info("YAHJ YAH")
+        if not text:
+            return None
         message = {
             "type": "gen",
             "text": text,
@@ -331,7 +371,12 @@ class DiscordClient(discord.Client):
             },
             "from": "hiran"
         }
+        while self.top_layer_blocked:
+            logger.info("business monk waiting for a business.")
+            time.sleep(0.5)
+        self.top_layer_blocked = True
         response = self.pack_and_send(self.top_layer_socket, message)
+        self.top_layer_blocked = False
         logger.info(response)
         return response
     
@@ -353,13 +398,13 @@ class DiscordClient(discord.Client):
     
         # Interfaceka o
     def gen_0(self, text, dmessage, learn, reply, store):
-        if not self.markov_layer:
+        if not self.markov_layer or not text:
             return
         dummy = False
         guild = None
-        if dmessage.guild is not None:
-            guild = dmessage.guild.id
         if store:
+            if dmessage.guild is not None:
+                guild = dmessage.guild.id
             dummy = {
                 "guild": guild,
                 "channel": dmessage.channel.id,
@@ -377,7 +422,12 @@ class DiscordClient(discord.Client):
         }
         logger.info(message)
         start_time = time.perf_counter()
+        while self.markov_layer_blocked:
+            logger.info("business monk waiting for a business.")
+            time.sleep(0.5)
+        self.markov_layer_blocked = True
         response = self.pack_and_send(self.markov_socket, message)
+        self.markov_layer_blocked = False
         end_time = time.perf_counter()
         logger.info(response)
         logger.info(f"marlopv gen time {end_time - start_time:.6f} sekonmd")
@@ -403,12 +453,13 @@ class DiscordClient(discord.Client):
             #replyka            
             if reply is not None:
                 reply = self.pipe(reply, self.get_pipe(message.channel.id))
-                logger.info(f"pipe outpu:::: {reply}")
-                reply = self.specially_kanal_filter(message, reply)
-                if rep:
-                    await message.reply(reply)
-                else:
-                    await message.channel.send(reply)
+                if reply is not None:
+                    logger.info(f"pipe outpu:::: {reply}")
+                    reply = self.specially_kanal_filter(message, reply)
+                    if rep:
+                        await message.reply(reply)
+                    else:
+                        await message.channel.send(reply)
 
     async def on_message(self, message: discord.Message):
         _learn = False
@@ -417,12 +468,15 @@ class DiscordClient(discord.Client):
 
         #anti webhooker
         if hasattr(message, 'webhook_id'):
-            if message.webhook_id:
-                webhook = await self.fetch_webhook(message.webhook_id)
-                if webhook.name in SPOMQA_WEBHOOKER_nAME:
-                    return
-                if message.webhook_id in SPOMQA_WEBHOOKER_ID:
-                    return
+            if message.webhook_id and message.webhook_id not in self._ok_webhooker:
+                try:
+                    webhook = await self.fetch_webhook(message.webhook_id)
+                    if webhook.name in SPOMQA_WEBHOOKER_nAME:
+                        return
+                    if message.webhook_id in SPOMQA_WEBHOOKER_ID:
+                        return
+                except:
+                    self._ok_webhooker.append(message.webhook_id)
 
         #boortoop
         if str(message.author) == BOT_USERNAME:
@@ -436,7 +490,7 @@ class DiscordClient(discord.Client):
         if str(message.channel.id) == '695007649141620754':
             self.last_message_time = discord.utils.utcnow()
         
-        filtered_content = MessageFilter.filter_content(message)
+        filtered_content = self.harraq_filter.filter_content(message)
         if filtered_content == '':
             return
 
