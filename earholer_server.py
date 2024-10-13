@@ -26,12 +26,13 @@ class Earholer():
     def handle_message(self, message):
         try:
             logger.info(message)
-            text = message['text']
             if message['type'] == 'ping':
-                return ({'type': 'pong'})
+                return ({'type': 'pong', 'from': "hiran"})
+            text = message['text']
+            print("AM CALL CALLBACKS")
             gen_dot_douglas = self.cf(text)
             if gen_dot_douglas is None:
-                return "NOTTE"
+                return None
             return gen_dot_douglas
         except Exception as e:
             logger.error(e)
