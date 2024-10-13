@@ -11,7 +11,6 @@ import random
 import json
 from config import *
 from capture_filter import MessageFilter
-from earholer_server import Earholer
 import logging
 import asyncio
 
@@ -86,11 +85,7 @@ class DiscordClient(discord.Client):
         self.timer_started = False
         self.top_layer = False
         self.markov_layer = False
-        self.earhole = False
-        self.runny_earhole = False
         
-        self.top_layer_blocked = False
-        self.markov_layer_blocked = False
         self.patterns = {
             r'<#\d+>': 'DISCORD_CHANNEL',
             r'<@\d+>': 'DISCORD_MENTION',
@@ -106,14 +101,12 @@ class DiscordClient(discord.Client):
         self.top_layer_socket = self.top_layer_context.socket(zmq.REQ)
         self.top_layer_socket.setsockopt(zmq.RCVTIMEO, 60000)
         self.top_layer_socket.connect(f"tcp://127.0.0.1:{TOP_LAYER_PORT}")
-        self.earholer_server = Earholer(self.hobalda)       
 
     async def on_thread_join(self, thread):
         await thread.join()
         await thread.send(f"wecloomes mysekf")
         
     async def on_ready(self):
-        
         print(" ===========================================AM READINGSONSS")
         self.ready = True
         self.timer_task.start()
@@ -123,43 +116,6 @@ class DiscordClient(discord.Client):
             await self.get_channel(USERPHONE_CHANNEL).send("HUHHARABIN")
             await self.userphon(self.get_channel(USERPHONE_CHANNEL))
             
-        asyncio.create_task(self.earhole_task())
-            
-
-    async def earhole_task(self):
-        try:
-            await asyncio.to_thread(self.earholer_server.run)
-        except Exception as e:
-            logger.info(e)
-            self.reset_skype()
-        
-        
-    def hobalda(self, msg):
-        print("AM HERE OK")
-        while self.markov_layer_blocked:
-            logger.info("G0 business monk waiting for a business.")
-            time.sleep(0.5)
-        self.markov_layer_blocked = True
-        print("AM GEN0 OK")
-        laxanka = self.gen_0(msg, None, False, True, False)
-        print("AM HERE OK AN GEN", laxanka)
-        self.markov_layer_blocked = False
-        if laxanka is None:
-            print("EMPTY LAXANKAX")
-            return None
-        while self.top_layer_blocked:
-            logger.info("G1 business monk waiting for a business.")
-            time.sleep(0.5)
-        self.top_layer_blocked = True
-        print("YAH MR ANUSHI AM HERE")
-        laxanka2 = self.gen_1_t5(laxanka)
-        print(":MR ANUSHKA AM GENERATED", laxanka)
-        self.top_layer_blocked = False
-        if not laxanka2:
-            return laxanka
-        return laxanka2
-
-        
     # task  o
     async def userphon(self, channel):
         # Update the last message time and reset the timer
@@ -207,14 +163,10 @@ class DiscordClient(discord.Client):
             self.top_layer = True
         except Exception as e:
             logger.error(traceback.format_exc())
-            self.top_layer_blocked = True
-            self.top_layer = False
             self.top_layer_socket.close()
             self.top_layer_socket = self.top_layer_context.socket(zmq.REQ)
             self.top_layer_socket.connect(f"tcp://127.0.0.1:{TOP_LAYER_PORT}")
             logger.error("ANTI HEART BEAT TOP LAYER")
-        finally:
-            self.top_layer_blocked = False
 
         try:
             response = self.ping_socket(self.markov_socket)
@@ -223,14 +175,10 @@ class DiscordClient(discord.Client):
         except Exception as e:
             logging.error(e)
             logger.error(traceback.format_exc())
-            self.markov_layer_blocked = True
-            self.markov_layer = False
             self.markov_socket.close()
             self.markov_socket = self.markov_context.socket(zmq.REQ)
             self.markov_socket.connect(f"tcp://127.0.0.1:{MARKOV_PORT}")
             logger.error("ANTI HEARTBEAT MARKOV")
-        finally:
-            self.markov_layer_blocked = False
             
 
         
@@ -444,9 +392,6 @@ class DiscordClient(discord.Client):
         }
         logger.info(message)
         start_time = time.perf_counter()
-        #while self.markov_layer_blocked:
-        #    logger.info("G0 business monk waiting for a business.")
-        #    time.sleep(0.5)
         response = self.pack_and_send(self.markov_socket, message)
         end_time = time.perf_counter()
         logger.info(response)
