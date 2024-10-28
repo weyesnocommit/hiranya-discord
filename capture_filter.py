@@ -11,8 +11,8 @@ ANTI_ALWOW[re.compile(r'([🇦🇧🇨🇩🇪🇫🇬🇭🇮🇯🇰🇱🇲�
 
 class MessageFilter(object):
 	@staticmethod
-	def filter_content(message: discord.Message):
-		filtered_content = message.content
+	def filter_content(message: str):
+		filtered_content = message
 		# Prevents words (declared under bot_config.py) from being captured into the bot's database
 		#filtered_content = re.sub(BLOCK_PHRASE_ALL, '', filtered_content, flags=re.IGNORECASE)
 		# Prevents groups of regional indicator emojis of size 2 or larger from being captured

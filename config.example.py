@@ -1,3 +1,5 @@
+import logging
+
 # --- "User" Stuff Section ---
 # ----------------------------
 
@@ -66,5 +68,11 @@ DO_REMOVE_PHRASE = False
 
 # --- Technical Stuff Section ---
 # -------------------------------
+EARHOLER_PORT = "5557"
 TOP_LAYER_PORT = "5556"
 MARKOV_PORT = "5555"
+
+GEN_TIME_LIMIT = 20000
+HEART_BET_GREQ = 15
+
+SEVER_LOG_LEVEL = logging.INFO
