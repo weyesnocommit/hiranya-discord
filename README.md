@@ -1,7 +1,7 @@
 # 🛸 DOKITA HIRANYA DI CHONKER - INTERGALACTIC WISDOM BOT! 🌌
 
 [![天外来客](https://img.shields.io/badge/XDDDDDdde%20Bot-外星-ff69b4)](https://github.com)
-[![USING POWERFUL NIGERIA SOFTWARE](https://img.shields.io/badge/XDDDDDdde%20Bot-外星-ff69b4)](https://github.com)
+[![USING POWERFUL NIGERIA SOFTWARE](https://img.shields.io/badge/USING%20POWERFUL%20NIGERIA%20SOFTWARE外星-ff69b4)](https://github.com)
 
 ## AYYYEEEE MAKE UNA LISTEN WELL-WELL! 👽
 
