@@ -1,7 +1,7 @@
 # 🛸 DOKITA HIRANYA DI CHONKER - INTERGALACTIC WISDOM BOT! 🌌
 
-[![天外来客](https://img.shields.io/badge/Space%20Bot-外星-ff69b4)](https://github.com)
-[![Powered by CHONK](https://img.shields.io/badge/Powered%20by-CHONK-purple)](https://github.com)
+[![天外来客](https://img.shields.io/badge/XDDDDDdde%20Bot-外星-ff69b4)](https://github.com)
+[![Powered by CHONK](https://img.shields.io/badge/AM LOADINGSSSSSSSSSssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss)](https://github.com)
 
 ## AYYYEEEE MAKE UNA LISTEN WELL-WELL! 👽
 
