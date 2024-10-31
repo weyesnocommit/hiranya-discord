@@ -126,10 +126,12 @@ class DiscordClient(discord.Client):
             r'https?://\S+': 'URL',
             r'<:\w+:\d+>': 'DISCORD_EMOJI'
         }
-        self.markov_context = zmq.Context()
-        self.markov_socket = self.create_zmq_socket(MARKOV_PORT)
-        self.top_layer_context = zmq.Context()
-        self.top_layer_socket = self.create_zmq_socket(TOP_LAYER_PORT)
+        self.zmq_context = {
+            "MARKOV": zmq.Context(),
+            "LLM": zmq.Context()
+        }
+        self.markov_socket = self.create_zmq_socket(MARKOV_PORT, "MARKOV")
+        self.top_layer_socket = self.create_zmq_socket(TOP_LAYER_PORT, "LLM")
 
     async def on_thread_join(self, thread):
         await thread.join()
@@ -178,8 +180,8 @@ class DiscordClient(discord.Client):
     
     ###################### START TOFI ZMQ stufyf ######################
     
-    def create_zmq_socket(self, port):
-        socket = self.markov_context.socket(zmq.REQ)
+    def create_zmq_socket(self, port, layer_name):
+        socket = self.zmq_context[layer_name].socket(zmq.REQ)
         socket.setsockopt(zmq.RCVTIMEO, GEN_TIME_LIMIT)
         socket.connect(f"tcp://127.0.0.1:{port}")
         return socket
@@ -225,9 +227,9 @@ class DiscordClient(discord.Client):
         logger.error(f"Reconnecting {layer_name} socket")
         socket.close()
         if layer_name == "LLM":
-            self.top_layer_socket = self.create_zmq_socket(TOP_LAYER_PORT)
+            self.top_layer_socket = self.create_zmq_socket(TOP_LAYER_PORT, layer_name)
         elif layer_name == "MARKOV":
-            self.markov_socket = self.create_zmq_socket(MARKOV_PORT)
+            self.markov_socket = self.create_zmq_socket(MARKOV_PORT, layer_name)
 
     def pack_and_send(self, socket, data):
         try:
