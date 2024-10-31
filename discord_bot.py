@@ -53,7 +53,7 @@ class Context():
     def get(self):
         return [x for x in self.chat_context if x is not None]
     
-    def to_string(self):
+    def to_string(self, sep=""):
         items = self.get()
         if self.count > 1:
             weights = [2 ** i for i in range(self.count)]
@@ -61,10 +61,10 @@ class Context():
                 range(self.count), weights=weights, k=min(self.count, 3))]
             items.append(self.last)
             new_array = [b for b in items if len(b) <= 4*len(self.last)]
-            return ". ".join(list(set([item.capitalize() for item in new_array])))
+            return f"{sep} ".join(list(set([item.capitalize() for item in new_array])))
         else:
             return self.last
-        
+            
     def sample(self, n):
         if n <= 0:
             return []
@@ -73,13 +73,31 @@ class Context():
         if not valid_messages:
             return []
 
+        # Use weights based on the position in the list, as before
         weights = [(2**i) for i in range(len(valid_messages))]
         total_weight = sum(weights)
         normalized_weights = [weight / total_weight for weight in weights]
-        sampled_messages = random.choices(valid_messages, weights=normalized_weights, k=min(n, len(valid_messages)))
+
+        # Calculate the number of samples to take, limited by the available messages
+        sample_count = min(n, len(valid_messages))
+
+        # Use random.sample to ensure unique messages, with weighted sampling
+        sampled_messages = random.sample(
+            population=valid_messages, 
+            k=sample_count,
+            counts=normalized_weights  # Pass weights to ensure the weighted sampling
+        )
 
         return ". ".join(sampled_messages)
 
+    def last_three(self, sep=""):
+        items = self.get()
+        if len(items) < 3:
+            return self.last
+
+        last_three = items[-4:-1] if len(items) >= 4 else items[:-1]
+        result = f"{sep} ".join([item for item in last_three])
+        return result + f"{sep} " + self.last
 
 
 class DiscordClient(discord.Client):
@@ -89,7 +107,7 @@ class DiscordClient(discord.Client):
     pipes = {}
     temp = 1.5
     beam = 4
-    model = "T5-mihm-gc"
+    model = ["t5-mihm", "T5-cg"][0]
     harraq_filter = MessageFilter()
     _ok_webhooker = WEBHOOKER_WHITELISTKA
 
@@ -408,7 +426,7 @@ class DiscordClient(discord.Client):
         # Interfaceka o
     def gen_0(self, text, dmessage, learn, reply, store):
         if not self.layer_state['MARKOV'] or not text:
-            logger.info(f"is availables MARKOVKA: {self.markov_layer}")
+            logger.info(f"is availables MARKOVKA: {self.layer_state['MARKOV']}")
             return
         dummy = False
         guild = None
@@ -451,13 +469,14 @@ class DiscordClient(discord.Client):
             if str(message.channel.id) not in self.chat_context:
                 self.chat_context[str(message.channel.id)] = Context(50)
             self.chat_context[str(message.channel.id)].append(filtered_content)
-            sample = self.chat_context[str(message.channel.id)].sample(random.randint(1,5))
+            sample = self.chat_context[str(message.channel.id)].last_three()#sample(random.randint(1,5))
             reply = self.gen_0(sample, message, _learn, _reply, _store)
             logger.info(f"Input Texty: {filtered_content}, Context: {sample}, generate: {reply}")
 
             #replyka            
             if reply is not None:
                 print("PIAPEPPEAPE", self.layer_state)
+                #reply = f"question: {reply}? context: {sample}"
                 reply = self.pipe(reply, self.get_pipe(message.channel.id))
                 print("NOAT PIAEIPAIEI")
                 if reply is not None:
