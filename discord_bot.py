@@ -15,6 +15,8 @@ import logging
 import asyncio
 import numpy as np
 
+SAMPLING_STRATEGIES = ['softmax', 'top_p', 'top_k', 'greedy', 'random', 'top_p_k']
+
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s][%(levelname)s][%(name)s]: %(message)s',
@@ -118,8 +120,15 @@ class DiscordClient(discord.Client):
         'repetition_penalty': 1.1
     }
     markov_cfg = {
-        "markov_temp": 1.0,
-        "struct_temp": 1.0
+        'markov': {
+            'strategy': SAMPLING_STRATEGIES[5],
+            "temperature": 1.0,
+            'top_k': 50,
+            'top_p': 0.9
+        },
+        'struct': {
+            'temperature': 1.0
+        }
     }
     models = ["t5-mihm", "t5-gcc-03", "flant5-gcc-01"]
     
@@ -136,6 +145,7 @@ class DiscordClient(discord.Client):
         self.last_message_time = discord.utils.utcnow()
         self.timer_started = False
         self.layer_state = {"LLM": True, "MARKOV": True}
+        self.use_llm = True
         print(self.llm_cfg)
         
         self.patterns = {
@@ -298,6 +308,8 @@ class DiscordClient(discord.Client):
         return text
 
     def pipeka_numberka(self, hubinta: str) -> int:
+        if not self.use_llm:
+            return hubinta
         baaritanka = re.fullmatch(r'pipe(\d+)', hubinta)
         if baaritanka:
             numbet = int(baaritanka.group(1))
@@ -380,22 +392,53 @@ class DiscordClient(discord.Client):
         if message.content.startswith('markov_temp '):
             try:
                 temp_value = float(message.content.split('markov_temp ')[1])
-                self.markov_cfg['markov_temp'] = max(0.1, temp_value)
-                logger.info(f"NEW MARKOV TEMPKA {self.markov_cfg['markov_temp']}")
+                self.markov_cfg['markov']['temperature'] = max(0.1, temp_value)
+                logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
             except Exception as e:
                 logger.info(e)
                 await message.channel.send("AM NITTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH")
+
+        if message.content.startswith('markov_strategy '):
+            try:
+                temp_value = message.content.split('markov_strategy ')[1]
+                if temp_value in SAMPLING_STRATEGIES:
+                    self.markov_cfg['markov']['strategy'] = temp_value
+                    logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
+            except Exception as e:
+                logger.info(e)
+                await message.channel.send("AM NITTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH")
+
+        if message.content.startswith('markov_topp '):
+            try:
+                temp_value = float(message.content.split('markov_topp ')[1])
+                self.markov_cfg['markov']['top_p'] = min(max(0.1, temp_value), 1.0)
+                logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
+            except Exception as e:
+                logger.info(e)
+                await message.channel.send("AM NITTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH")
+
+        if message.content.startswith('markov_topk '):
+            try:
+                temp_value = int(message.content.split('markov_topk ')[1])
+                self.markov_cfg['markov']['top_k'] = max(1, temp_value)
+                logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
+            except Exception as e:
+                logger.info(e)
+                await message
 
         if message.content.startswith('struct_temp '):
             try:
                 temp_value = float(message.content.split('struct_temp ')[1])
-                self.markov_cfg['struct_temp'] = max(0.1, temp_value)
-                logger.info(f"NEW STRUCT TEMPKA {self.markov_cfg['struct_temp']}")
+                self.markov_cfg['struct']['temperature'] = max(0.1, temp_value)
+                logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
             except Exception as e:
                 logger.info(e)
                 await message.channel.send("AM NITTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH")
 
-
+        if message.content == 'llmkaoffka':
+            self.use_llm = False
+        if message.content == 'llmkaonka':
+            self.use_llm = True
 
 
         # llmcfg
@@ -541,8 +584,7 @@ class DiscordClient(discord.Client):
             "learn": learn,
             "reply": reply,
             "store": store,
-            "markov_temp": self.markov_cfg['markov_temp'],
-            "struct_temp": self.markov_cfg['struct_temp']
+            "sampling_config": self.markov_cfg
         }
         logger.info(message)
         start_time = time.perf_counter()
