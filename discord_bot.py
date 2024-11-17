@@ -13,6 +13,7 @@ from config import *
 from capture_filter import MessageFilter
 import logging
 import asyncio
+import numpy as np
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,10 +44,19 @@ class Context():
         self.size = size
         self.chat_context = [None] * size
 
-    def append(self, item):
-        self.last = item
-        if item not in self.chat_context:
-            self.chat_context[self.index] = item
+    def is_in_contextka(self, message):
+        if self.count < 1:
+            return False
+        for msg in self.chat_context:
+            if msg is not None:
+                if msg[1] == message:
+                    return True
+        return False
+
+    def append(self, name, message):
+        self.last = message
+        if not self.is_in_contextka(message):
+            self.chat_context[self.index] = (name, message.replace(":", "-"))
             self.index = (self.index + 1) % self.size
             self.count = min(self.count + 1, self.size)
 
@@ -61,43 +71,37 @@ class Context():
                 range(self.count), weights=weights, k=min(self.count, 3))]
             items.append(self.last)
             new_array = [b for b in items if len(b) <= 4*len(self.last)]
-            return f"{sep} ".join(list(set([item.capitalize() for item in new_array])))
+            return f"{sep} ".join(list(set([item[1].capitalize() for item in new_array])))
         else:
             return self.last
             
-    def sample(self, n):
-        if n <= 0:
-            return []
+    def sample_n(self, n=10, sep=". ", names = True):
+        items = self.get()
+        weights = np.exp(np.linspace(0, 1, len(items)))  # Exponential growth
+        weights /= weights.sum()  # Normalize weights to sum to 1
+        # Sample n items based on weights without replacement
+        selected_indices = np.random.choice(len(items), size=min(len(items), n), replace=False, p=weights)
+        print("AM SELKECTIONS", selected_indices, weights)
+        sampled_items = [items[i] for i in sorted(selected_indices)]
+        if names:
+            result = f"{sep}".join(f"{i[0]}: {i[1]}" for i in sampled_items)
+            return result
+        else:
+            result = f"{sep}".join(f"{i[1]}" for i in sampled_items)
+            return result
 
-        valid_messages = self.get()
-        if not valid_messages:
-            return []
-
-        # Use weights based on the position in the list, as before
-        weights = [(2**i) for i in range(len(valid_messages))]
-        total_weight = sum(weights)
-        normalized_weights = [weight / total_weight for weight in weights]
-
-        # Calculate the number of samples to take, limited by the available messages
-        sample_count = min(n, len(valid_messages))
-
-        # Use random.sample to ensure unique messages, with weighted sampling
-        sampled_messages = random.sample(
-            population=valid_messages, 
-            k=sample_count,
-            counts=normalized_weights  # Pass weights to ensure the weighted sampling
-        )
-
-        return ". ".join(sampled_messages)
-
-    def last_three(self, sep=""):
+    def last_n(self, n=3, sep=". ", names= True):
         items = self.get()
         if len(items) < 3:
             return self.last
 
-        last_three = items[-4:-1] if len(items) >= 4 else items[:-1]
-        result = f"{sep} ".join([item for item in last_three])
-        return result + f"{sep} " + self.last
+        last_three = items[-n:] #items[-4:-1] if len(items) >= 4 else items[:-1]
+        if names:
+            result = f"{sep}".join([f"{item[0]}: {item[1]}" for item in last_three])
+            return result
+        else:
+            result = f"{sep}".join([item[1] for item in last_three])
+            return result
 
 
 class DiscordClient(discord.Client):
@@ -107,18 +111,32 @@ class DiscordClient(discord.Client):
     pipes = {}
     temp = 1.5
     beam = 4
-    model = ["t5-mihm", "T5-cg"][0]
+    llm_cfg =  {
+        "temperature" : 1.5,
+        'max_new_tokens': 250,
+        'num_beams': 3,
+        'repetition_penalty': 1.1
+    }
+    markov_cfg = {
+        "markov_temp": 1.0,
+        "struct_temp": 1.0
+    }
+    models = ["t5-mihm", "t5-gcc-03", "flant5-gcc-01"]
+    
     harraq_filter = MessageFilter()
     _ok_webhooker = WEBHOOKER_WHITELISTKA
+    task = "grammar: "
 
     def __init__(self, intents):
         super().__init__(intents=intents)
+        self.model = self.models[1]
         self.ready = False
         self.timeout_duration = 60*60*1
         self.message_channel = None
         self.last_message_time = discord.utils.utcnow()
         self.timer_started = False
         self.layer_state = {"LLM": True, "MARKOV": True}
+        print(self.llm_cfg)
         
         self.patterns = {
             r'<#\d+>': 'DISCORD_CHANNEL',
@@ -358,11 +376,33 @@ class DiscordClient(discord.Client):
         if pipe_numbet:
             self.pipes[message.channel.id] = pipe_numbet
 
-        # temnmpka
+        # markovcfg
+        if message.content.startswith('markov_temp '):
+            try:
+                temp_value = float(message.content.split('markov_temp ')[1])
+                self.markov_cfg['markov_temp'] = max(0.1, temp_value)
+                logger.info(f"NEW MARKOV TEMPKA {self.markov_cfg['markov_temp']}")
+            except Exception as e:
+                logger.info(e)
+                await message.channel.send("AM NITTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH")
+
+        if message.content.startswith('struct_temp '):
+            try:
+                temp_value = float(message.content.split('struct_temp ')[1])
+                self.markov_cfg['struct_temp'] = max(0.1, temp_value)
+                logger.info(f"NEW STRUCT TEMPKA {self.markov_cfg['struct_temp']}")
+            except Exception as e:
+                logger.info(e)
+                await message.channel.send("AM NITTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH")
+
+
+
+
+        # llmcfg
         if message.content.startswith('temp '):
             try:
                 temp_value = float(message.content.split('temp ')[1])
-                self.temp = max(0.1, temp_value)
+                self.llm_cfg['temperature'] = max(0.1, temp_value)
                 logger.info(f"NEW TEMPKA {self.temp}")
             except ValueError:
                 await message.channel.send("INOOO NO YOU WRONGS IT YOU WRONGS IT")
@@ -370,8 +410,8 @@ class DiscordClient(discord.Client):
         #beamka
         if message.content.startswith('beam '):
             try:
-                temp_value = float(message.content.split('beam ')[1])
-                self.beam = temp_value
+                temp_value = int(message.content.split('beam ')[1])
+                self.llm_cfg['num_beams'] = temp_value
                 logger.info("NEW BEAMKA", self.beam)
             except ValueError:
                 await message.channel.send("INOOO NO YOU WRONGS IT YOU WRONGS IT")
@@ -379,14 +419,70 @@ class DiscordClient(discord.Client):
         if message.content.startswith('modelka '):
             try:
                 model = message.content.split("modelka ")[1]
-                if model in ["T5-mihm-gc", "T5-cg"]:
+                if model in self.models:
                     self.model - model
             except:
                 await message.channel.send("YOU NOT CORECT")
         
+        if message.content.startswith('task '):
+            try:
+                task = message.content.split("task ")[1]
+                if task in ['grammar', 'complete', 'translate English to German', 'translate English to Chinese']:
+                    self.task = task + ": "
+                if task == "none":
+                    self.task = ""
+                logger.info(f"NEW TASKSA {self.task}")
+                
+            except:
+                await message.channel.send("NOT WRONGS ITS YOU")
+    
+    def repair_discord_mentions(self, text):
+        emoji_pattern = r"(?<!<)[-:](\w+)[-:](\d+)(>?)"
+        mention_pattern = r"(?<!<)[@#&\-](\w+|\d+)[\-:](\d+)(>?)"
+        repaired_text = re.sub(emoji_pattern, r"<:\1:\2>", text)
+
+        def mention_replacer(match):
+            prefix = match.group(0)[0]  # Extract the type symbol (:, @, #, or &)
+            if prefix == ':':  # Emoji
+                return f"<:{match.group(1)}:{match.group(2)}>"
+            elif prefix == '@':  # User or role
+                if '&' in match.group(0):  # Role mention
+                    return f"<@&{match.group(2)}>"
+                return f"<@{match.group(2)}>"  # User mention
+            elif prefix == '#':  # Channel mention
+                return f"<#{match.group(2)}>"
+            return match.group(0)
+
+        repaired_text = re.sub(mention_pattern, mention_replacer, repaired_text)
+        repaired_text = re.sub(r"(>){2,}", ">", repaired_text)
+        return repaired_text
     
     
+    def fix_refs(self, message):
+        broken_mention_pattern = r'(?<!<)([@#&]\d+>)'
+        fixed_message = re.sub(broken_mention_pattern, r'<\1', message)
+        return fixed_message
     
+    def input_fromatter(self, text, context = ""):
+        if self.model == 't5-mihm':
+            return self.task+text
+        elif self.model == 't5-gcc-03':
+            text = text.replace("grammar", "NOTT")
+            context = context.replace("grammar", 'nott')
+            return f"grammar: {text} | {context}"
+        elif self.model == 'flant5-gcc-01':
+            return f"grammar: {text} context:\n\n{context} </s>"
+        
+    def output_fromatter(self, text):
+        if self.model == 't5-mihm':
+            pattern = r"(?<!<):(\w+):(\d+)(?=>|$)"
+            repaired_text = re.sub(pattern, r"<:\1:\2>", text)
+            return repaired_text
+        elif self.model == 't5-gcc-03':
+            return self.fix_refs(self.repair_discord_mentions(text))
+        elif self.model == 'flant5-gcc-01':
+            return text
+        
     # upper lyaer
     def gen_1_t5(self, text: str):
         print("AM HERES", self.layer_state)
@@ -398,25 +494,21 @@ class DiscordClient(discord.Client):
             "type": "gen",
             "text": text,
             "model": self.model,
-            "config" : {
-                "temperature" : self.temp,
-                'max_new_tokens': 500,
-                'num_beams': 2,
-            },
+            "config" : self.llm_cfg,
             "from": "hiran"
         }
         response = self.pack_and_send(self.top_layer_socket, message)
         logger.info(response)
         return response
     
-    def pipe(self, reply, pipe= 0):   
+    def pipe(self, input, pipe= 0):   
         start_time = time.perf_counter()
         if pipe == 1:
-            return self.gen_1_t5(reply)
+            return self.gen_1_t5(input)
         if pipe == 2:
             return reply
-        reply, tags = self.tag_patterns(reply)
-        oky = self.untag_patterns(self.gen_1_t5(reply), tags)
+        reply, tags = self.tag_patterns(input)
+        oky = self.untag_patterns(self.gen_1_t5(input), tags)
         end_time = time.perf_counter()
         
         logger.info(f"pipe gen time {end_time - start_time:.6f} sekonmd")
@@ -448,7 +540,9 @@ class DiscordClient(discord.Client):
             "dmessage": dummy,
             "learn": learn,
             "reply": reply,
-            "store": store
+            "store": store,
+            "markov_temp": self.markov_cfg['markov_temp'],
+            "struct_temp": self.markov_cfg['struct_temp']
         }
         logger.info(message)
         start_time = time.perf_counter()
@@ -465,13 +559,23 @@ class DiscordClient(discord.Client):
             reply = reply.split(" ")[0]
         return reply
     
+    def get_name(self, message):
+        try:
+            n = message.author.nick
+            if n:
+                return n
+            else:
+                return message.author.name
+        except:
+            return message.author.name
+    
     # d breads and butters
     async def reply(self, message, filtered_content, _learn:bool, _reply:bool, _store:bool, prefix = '', rep = False):
         async with message.channel.typing():
             if str(message.channel.id) not in self.chat_context:
-                self.chat_context[str(message.channel.id)] = Context(50)
-            self.chat_context[str(message.channel.id)].append(filtered_content)
-            sample = self.chat_context[str(message.channel.id)].last_three()#sample(random.randint(1,5))
+                self.chat_context[str(message.channel.id)] = Context(150)
+            self.chat_context[str(message.channel.id)].append(self.get_name(message), filtered_content)
+            sample = self.chat_context[str(message.channel.id)].last_n(5, ". ", False) #.sample_n(random.randint(3,10), ". ", False)
             reply = self.gen_0(sample, message, _learn, _reply, _store)
             logger.info(f"Input Texty: {filtered_content}, Context: {sample}, generate: {reply}")
 
@@ -479,12 +583,15 @@ class DiscordClient(discord.Client):
             if reply is not None:
                 print("PIAPEPPEAPE", self.layer_state)
                 #reply = f"question: {reply}? context: {sample}"
-                reply = self.pipe(reply, self.get_pipe(message.channel.id))
-                print("NOAT PIAEIPAIEI")
+                ctx = self.chat_context[str(message.channel.id)].last_n(3, "\n")
+                input = self.input_fromatter(reply, ctx)
+                reply = self.pipe(input, self.get_pipe(message.channel.id))
+                print("NOAT PIAEIPAIEI", reply, ctx)
                 if reply is not None:
+                    reply = self.output_fromatter(reply)
                     reply = self.harraq_filter.filter_content(reply)
                     if SELF_CONTEXT:
-                        self.chat_context[str(message.channel.id)].append(reply)
+                        self.chat_context[str(message.channel.id)].append("hiranya", reply)
                     logger.info(f"pipe outpu:::: {reply}")
                     reply = self.specially_kanal_filter(message, reply)
                     if rep:
@@ -587,7 +694,8 @@ class DiscordClient(discord.Client):
                                 rep = True
                         await self.reply(message, filtered_content,  _learn, _reply, _store, rep=rep)
                 except Exception as e:
-                    #logger.info(str(e))
+                    logger.error(str(e))
+                    logger.error(traceback.format_exc())
                     #logger.info("Forbidden" in str(e) or "forbidden" in str(e).lower())
                     if "Forbidden" in str(e):
                         self.badka.append(message.channel.id)
