@@ -92,30 +92,32 @@ class Context():
             result = f"{sep}".join(f"{i[2]}" for i in sampled_items)
             return result
 
-    def last_n(self, n=3, sep=". ", names= True, namesep=": ", ids=False):
+    def last_n(self, n=3, sep=". ", names= True, namesep=": ", ids=False, filter_out_ids=None):
+        if not filter_out_ids:
+            filter_out_ids = []
+            
         items = self.get()
         if len(items) < 3:
             return self.last
 
         last_three = items[-n:] #items[-4:-1] if len(items) >= 4 else items[:-1]
         if names and not ids:
-            result = f"{sep}".join([f"{item[1]}{namesep}{item[2]}" for item in last_three])
+            result = f"{sep}".join([f"{item[1]}{namesep}{item[2]}" for item in last_three if item[0] not in filter_out_ids])
             return result
         if names and ids:
-            result = f"{sep}".join([f"{item[0]}</uid>{item[1]}{namesep}{item[2]}" for item in last_three])
+            result = f"{sep}".join([f"{item[0]}</uid>{item[1]}{namesep}{item[2]}" for item in last_three if item[0] not in filter_out_ids])
             return result
         else:
-            result = f"{sep}".join([item[2] for item in last_three])
+            result = f"{sep}".join([item[2] for item in last_three if item[0] not in filter_out_ids])
             return result
 
 
 class DiscordClient(discord.Client):
+    _channel_tasks = {}
     muhharaq = "business on the business"
     badka = []
     chat_context = {}
     pipes = {}
-    temp = 1.1
-    beam = 4
     llm_cfg =  {
         "temperature" : 2.0,
         'max_new_tokens': 250,
@@ -638,10 +640,7 @@ class DiscordClient(discord.Client):
     # d breads and butters
     async def reply(self, message, filtered_content, _learn:bool, _reply:bool, _store:bool, prefix = '', rep = False):
         async with message.channel.typing():
-            if str(message.channel.id) not in self.chat_context:
-                self.chat_context[str(message.channel.id)] = Context(150)
-            self.chat_context[str(message.channel.id)].append(message.author.id, self.get_name(message), filtered_content)
-            sample = self.chat_context[str(message.channel.id)].last #.last_n(1, ". ", False) #.sample_n(random.randint(3,10), ". ", False)
+            sample = self.chat_context[str(message.channel.id)].last_n(3, sep=". ", names=False, filter_out_ids=[797884527510290433]) #.sample_n(random.randint(3,10), ". ", False)
             reply = self.gen_0(sample, message, _learn, _reply, _store)
 
             #replyka            
@@ -716,8 +715,20 @@ class DiscordClient(discord.Client):
             _learn = False
             _store = False
         
-        await self._on_message(message, filtered_content, _learn, _store, _reply)
+                
+        if str(message.channel.id) not in self.chat_context:
+            self.chat_context[str(message.channel.id)] = Context(150)
+        self.chat_context[str(message.channel.id)].append(message.author.id, self.get_name(message), filtered_content)
+        
+        channel_id = str(message.channel.id)
+        if channel_id in self._channel_tasks and not self._channel_tasks[channel_id].done():
+            print(f"Task for channel {channel_id} is busy")
+            return
 
+        self._channel_tasks[channel_id] = asyncio.create_task(
+            self._on_message(message, filtered_content, _learn, _store, _reply)
+        )
+        
     async def _on_message(self, message: discord.Message, filtered_content, _learn, _store, _reply):
        
         # Random Reply alzo d blocked list
