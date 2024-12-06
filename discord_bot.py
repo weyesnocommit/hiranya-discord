@@ -117,6 +117,7 @@ class DiscordClient(discord.Client):
     muhharaq = "business on the business"
     badka = []
     chat_context = {}
+    markov_topics = {}
     pipes = {}
     llm_cfg =  {
         "temperature" : 2.0,
@@ -640,14 +641,18 @@ class DiscordClient(discord.Client):
     # d breads and butters
     async def reply(self, message, filtered_content, _learn:bool, _reply:bool, _store:bool, prefix = '', rep = False):
         async with message.channel.typing():
-            sample = self.chat_context[str(message.channel.id)].last_n(3, sep=". ", names=False, filter_out_ids=[797884527510290433]) #.sample_n(random.randint(3,10), ". ", False)
+            channel_id = str(message.channel.id)
+            
+            sample = ". ".join(self.markov_topics[channel_id]) #self.chat_context[str(message.channel.id)].last_n(3, sep=". ", names=False, filter_out_ids=[797884527510290433]) #.sample_n(random.randint(3,10), ". ", False)
+            self.markov_topics[channel_id] = []
+            
             reply = self.gen_0(sample, message, _learn, _reply, _store)
 
             #replyka            
             if reply is not None:
                 logger.info(f"\nINPUT: {filtered_content}\nCONTX: {sample}\nMARKO: {reply}")
                 #reply = f"question: {reply}? context: {sample}"
-                ctx = self.chat_context[str(message.channel.id)]
+                ctx = self.chat_context[channel_id]
                 input, cnt_ = self.input_fromatter(reply, ctx)
                 reply = self.pipe(input, self.get_pipe(message.channel.id))
                 logger.info(f"\nCONTX: {cnt_}\nLMGEN: {reply}")
@@ -655,7 +660,7 @@ class DiscordClient(discord.Client):
                     reply = self.output_fromatter(reply)
                     reply = self.harraq_filter.filter_content(reply)
                     if SELF_CONTEXT:
-                        self.chat_context[str(message.channel.id)].append(797884527510290433, "hiranya", reply)
+                        self.chat_context[channel_id].append(797884527510290433, "hiranya", reply)
                     logger.info(f"pipe outpu:::: {reply}")
                     reply = self.specially_kanal_filter(message, reply)
                 if rep:
@@ -715,12 +720,16 @@ class DiscordClient(discord.Client):
             _learn = False
             _store = False
         
-                
-        if str(message.channel.id) not in self.chat_context:
-            self.chat_context[str(message.channel.id)] = Context(150)
-        self.chat_context[str(message.channel.id)].append(message.author.id, self.get_name(message), filtered_content)
-        
         channel_id = str(message.channel.id)
+                
+        if channel_id not in self.chat_context:
+            self.chat_context[channel_id] = Context(150)
+        self.chat_context[channel_id].append(message.author.id, self.get_name(message), filtered_content)
+        
+        if channel_id not in self.markov_topics:
+            self.markov_topics[channel_id] = []
+        self.markov_topics[channel_id].append(filtered_content)
+
         if channel_id in self._channel_tasks and not self._channel_tasks[channel_id].done():
             print(f"Task for channel {channel_id} is busy")
             return
