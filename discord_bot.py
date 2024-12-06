@@ -51,14 +51,14 @@ class Context():
             return False
         for msg in self.chat_context:
             if msg is not None:
-                if msg[1] == message:
+                if msg[2] == message:
                     return True
         return False
 
-    def append(self, name, message):
+    def append(self, id, name, message):
         self.last = message
         if not self.is_in_contextka(message):
-            self.chat_context[self.index] = (name, message.replace(":", "-"))
+            self.chat_context[self.index] = (id, name, message)
             self.index = (self.index + 1) % self.size
             self.count = min(self.count + 1, self.size)
 
@@ -73,7 +73,7 @@ class Context():
                 range(self.count), weights=weights, k=min(self.count, 3))]
             items.append(self.last)
             new_array = [b for b in items if len(b) <= 4*len(self.last)]
-            return f"{sep} ".join(list(set([item[1].capitalize() for item in new_array])))
+            return f"{sep} ".join(list(set([item[2].capitalize() for item in new_array])))
         else:
             return self.last
             
@@ -86,23 +86,26 @@ class Context():
         print("AM SELKECTIONS", selected_indices, weights)
         sampled_items = [items[i] for i in sorted(selected_indices)]
         if names:
-            result = f"{sep}".join(f"{i[0]}: {i[1]}" for i in sampled_items)
+            result = f"{sep}".join(f"{i[1]}: {i[2]}" for i in sampled_items)
             return result
         else:
-            result = f"{sep}".join(f"{i[1]}" for i in sampled_items)
+            result = f"{sep}".join(f"{i[2]}" for i in sampled_items)
             return result
 
-    def last_n(self, n=3, sep=". ", names= True):
+    def last_n(self, n=3, sep=". ", names= True, namesep=": ", ids=False):
         items = self.get()
         if len(items) < 3:
             return self.last
 
         last_three = items[-n:] #items[-4:-1] if len(items) >= 4 else items[:-1]
-        if names:
-            result = f"{sep}".join([f"{item[0]}: {item[1]}" for item in last_three])
+        if names and not ids:
+            result = f"{sep}".join([f"{item[1]}{namesep}{item[2]}" for item in last_three])
+            return result
+        if names and ids:
+            result = f"{sep}".join([f"{item[0]}</uid>{item[1]}{namesep}{item[2]}" for item in last_three])
             return result
         else:
-            result = f"{sep}".join([item[1] for item in last_three])
+            result = f"{sep}".join([item[2] for item in last_three])
             return result
 
 
@@ -111,26 +114,29 @@ class DiscordClient(discord.Client):
     badka = []
     chat_context = {}
     pipes = {}
-    temp = 1.5
+    temp = 1.1
     beam = 4
     llm_cfg =  {
-        "temperature" : 1.5,
+        "temperature" : 2.0,
         'max_new_tokens': 250,
-        'num_beams': 3,
-        'repetition_penalty': 1.1
+        'num_beams': 2,
+        'repetition_penalty': 1.05
     }
     markov_cfg = {
         'markov': {
             'strategy': SAMPLING_STRATEGIES[5],
-            "temperature": 1.0,
-            'top_k': 50,
+            "temperature": 1.6,
+            'top_k': 100,
             'top_p': 0.9
         },
         'struct': {
-            'temperature': 1.0
+            'strategy': SAMPLING_STRATEGIES[5],
+            "temperature": 0.6,
+            'top_k': 100,
+            'top_p': 0.9
         }
     }
-    models = ["t5-mihm", "t5-gcc-03", "flant5-gcc-01"]
+    models = ["t5-cg-1.0", "t5-mihm", "t5-gcc-03", "flant5-gcc-01", "checkpoint-16500"]
     
     harraq_filter = MessageFilter()
     _ok_webhooker = WEBHOOKER_WHITELISTKA
@@ -138,7 +144,7 @@ class DiscordClient(discord.Client):
 
     def __init__(self, intents):
         super().__init__(intents=intents)
-        self.model = self.models[1]
+        self.model = self.models[0]
         self.ready = False
         self.timeout_duration = 60*60*1
         self.message_channel = None
@@ -172,11 +178,20 @@ class DiscordClient(discord.Client):
         self.heartbeat_task.start()
         
         if USERPHONE_CHANNEL:
-            await self.get_channel(USERPHONE_CHANNEL).send("HUHHARABIN")
+            await self.call_userphone()
             await self.userphon(self.get_channel(USERPHONE_CHANNEL))
   
     ###################### START TOFI USERPHONE yayf ######################
-  
+    
+    async def call_userphone(self):
+        channel = self.get_channel(USERPHONE_CHANNEL)
+        await channel.send("HUHHARABIN")
+        commands = await channel.application_commands()
+        for command in commands:
+            if command.name == "userphone":
+                await command.__call__(channel=channel)
+                break 
+    
     async def userphon(self, channel):
         # Update the last message time and reset the timer
         self.last_message_time = discord.utils.utcnow()
@@ -195,7 +210,7 @@ class DiscordClient(discord.Client):
         if elapsed_time >= self.timeout_duration:
             try:
                 if self.message_channel and USERPHONE_CHANNEL:
-                    await self.get_channel(USERPHONE_CHANNEL).send("--userphone")
+                    await self.call_userphone()
                 self.last_message_time = discord.utils.utcnow()  # Reset the timer
             except Exception as e:
                 logger.error(str(e))
@@ -367,7 +382,7 @@ class DiscordClient(discord.Client):
             cursor.execute("INSERT INTO users (user_id, username, nickname) VALUES (?, ?, ?)",
                         (message.author.id, message.author.name, CHAEHCCHAECH))
             conn.commit()
-            msg = ConnectorRecvMessage("REMOVKINSONS AM REMOVE YOU AM REMOVKINSONS AM REMOVED YOUSKA AM REMOVED YOU OKAY AM REMOVED YOUR AM NOT AM NOT AM YES IYESIYESIYES I YES DIDKINSON MR NEVISHI AM YES YES So, regarding your silly ping...  Did you consider that I'm a grown-ass man, with a life?   That perhaps your joke wouldn't be very funny to me? Granted, not much of a life, but I had to pause my youtube video, switch to discord, read back several pages to see what the deal was.")
+            msg = "REMOVKINSONS AM REMOVE YOU AM REMOVKINSONS AM REMOVED YOUSKA AM REMOVED YOU OKAY AM REMOVED YOUR AM NOT AM NOT AM YES IYESIYESIYES I YES DIDKINSON MR NEVISHI AM YES YES So, regarding your silly ping...  Did you consider that I'm a grown-ass man, with a life?   That perhaps your joke wouldn't be very funny to me? Granted, not much of a life, but I had to pause my youtube video, switch to discord, read back several pages to see what the deal was."
             reply = self.gen_0(msg, message, False, True, False)
             await message.channel.send(f"IYES ~~~~~ ~ ~ {reply}")
 
@@ -375,7 +390,7 @@ class DiscordClient(discord.Client):
         if message.content.startswith('tarrachka tarrachka say me my laxanka number'):
             cursor.execute("DELETE FROM users WHERE user_id=?", (message.author.id,))
             conn.commit()
-            msg = ConnectorRecvMessage("i will pings you mr  anushi i will pings i will pingkinsosn like a pinkie finger")
+            msg = "i will pings you mr  anushi i will pings i will pingkinsosn like a pinkie finger"
             reply = self.gen_0(msg, message, False, True, False)
             await message.channel.send(f"I MOT !!!!11 ```cool 111```{reply}")
             
@@ -463,7 +478,7 @@ class DiscordClient(discord.Client):
             try:
                 model = message.content.split("modelka ")[1]
                 if model in self.models:
-                    self.model - model
+                    self.model = model
             except:
                 await message.channel.send("YOU NOT CORECT")
         
@@ -507,23 +522,30 @@ class DiscordClient(discord.Client):
         return fixed_message
     
     def input_fromatter(self, text, context = ""):
+        formatted = "AMNOT"
+        ctx = ""
         if self.model == 't5-mihm':
             return self.task+text
         elif self.model == 't5-gcc-03':
             text = text.replace("grammar", "NOTT")
-            context = context.replace("grammar", 'nott')
-            return f"grammar: {text} | {context}"
+            ctx = context.last_n(7, sep=chr(10))# context.replace("grammar", 'nott')
+            formatted = f'grammar: {text} | {ctx}'
         elif self.model == 'flant5-gcc-01':
-            return f"grammar: {text} context:\n\n{context} </s>"
+            ctx = context.last_n(15, sep=chr(10))
+            formatted = f'grammar: {text} context:\n\n{ctx} </s>'
+        elif self.model in ['t5-cg-1.0',  "checkpoint-16500"]:
+            ctx = context.last_n(7, sep=chr(10), names=True, namesep="</msg>", ids=True)
+            formatted = f'grammar: {text} context:\n\n{ctx} </s>'
+        return formatted, ctx
         
     def output_fromatter(self, text):
         if self.model == 't5-mihm':
             pattern = r"(?<!<):(\w+):(\d+)(?=>|$)"
             repaired_text = re.sub(pattern, r"<:\1:\2>", text)
             return repaired_text
-        elif self.model == 't5-gcc-03':
+        elif self.model in ['t5-gcc-03', 't5-cg-1.0']:
             return self.fix_refs(self.repair_discord_mentions(text))
-        elif self.model == 'flant5-gcc-01':
+        else:
             return text
         
     # upper lyaer
@@ -546,12 +568,14 @@ class DiscordClient(discord.Client):
     
     def pipe(self, input, pipe= 0):   
         start_time = time.perf_counter()
-        if pipe == 1:
-            return self.gen_1_t5(input)
-        if pipe == 2:
-            return reply
-        reply, tags = self.tag_patterns(input)
-        oky = self.untag_patterns(self.gen_1_t5(input), tags)
+        
+        #if pipe == 1:
+        #    return self.gen_1_t5(input)
+        #if pipe == 2:
+        #    return reply
+        #reply, tags = self.tag_patterns(input)
+        #oky = self.untag_patterns(self.gen_1_t5(input), tags)
+        oky = self.gen_1_t5(input)
         end_time = time.perf_counter()
         
         logger.info(f"pipe gen time {end_time - start_time:.6f} sekonmd")
@@ -616,31 +640,30 @@ class DiscordClient(discord.Client):
         async with message.channel.typing():
             if str(message.channel.id) not in self.chat_context:
                 self.chat_context[str(message.channel.id)] = Context(150)
-            self.chat_context[str(message.channel.id)].append(self.get_name(message), filtered_content)
-            sample = self.chat_context[str(message.channel.id)].last_n(5, ". ", False) #.sample_n(random.randint(3,10), ". ", False)
+            self.chat_context[str(message.channel.id)].append(message.author.id, self.get_name(message), filtered_content)
+            sample = self.chat_context[str(message.channel.id)].last #.last_n(1, ". ", False) #.sample_n(random.randint(3,10), ". ", False)
             reply = self.gen_0(sample, message, _learn, _reply, _store)
-            logger.info(f"Input Texty: {filtered_content}, Context: {sample}, generate: {reply}")
 
             #replyka            
             if reply is not None:
-                print("PIAPEPPEAPE", self.layer_state)
+                logger.info(f"\nINPUT: {filtered_content}\nCONTX: {sample}\nMARKO: {reply}")
                 #reply = f"question: {reply}? context: {sample}"
-                ctx = self.chat_context[str(message.channel.id)].last_n(3, "\n")
-                input = self.input_fromatter(reply, ctx)
+                ctx = self.chat_context[str(message.channel.id)]
+                input, cnt_ = self.input_fromatter(reply, ctx)
                 reply = self.pipe(input, self.get_pipe(message.channel.id))
-                print("NOAT PIAEIPAIEI", reply, ctx)
+                logger.info(f"\nCONTX: {cnt_}\nLMGEN: {reply}")
                 if reply is not None:
                     reply = self.output_fromatter(reply)
                     reply = self.harraq_filter.filter_content(reply)
                     if SELF_CONTEXT:
-                        self.chat_context[str(message.channel.id)].append("hiranya", reply)
+                        self.chat_context[str(message.channel.id)].append(797884527510290433, "hiranya", reply)
                     logger.info(f"pipe outpu:::: {reply}")
                     reply = self.specially_kanal_filter(message, reply)
-                    if rep:
-                        await message.reply(reply)
-                    else:
-                        await message.channel.send(reply)
-
+                if rep:
+                    await message.reply(reply)
+                else:
+                    await message.channel.send(reply)
+                    
     async def on_message(self, message: discord.Message):
         _learn = False
         _store = False
@@ -692,8 +715,11 @@ class DiscordClient(discord.Client):
             self.gen_0(filtered_content, message, _learn, False, _store)
             _learn = False
             _store = False
-            
         
+        await self._on_message(message, filtered_content, _learn, _store, _reply)
+
+    async def _on_message(self, message: discord.Message, filtered_content, _learn, _store, _reply):
+       
         # Random Reply alzo d blocked list
         if message.guild is not None:
             #bloqd server
@@ -720,21 +746,21 @@ class DiscordClient(discord.Client):
                         #match2 = re.search(pattern, filtered_content)
                         #if match2 or match1:
                         #    logger.info("YAP")
-                        logger.info(filtered_content)
-                        tex = filtered_content.split("<:userphone:650883846581125142>")
+                        tex = filtered_content.split("<:userphone:1311268018625576971>")
                         logger.info(tex)
                         if len(tex) > 1:
                             tex = tex[1]
                         else:
                             tex = filtered_content
-                        await self.reply(message, tex,  _learn, _reply, _store)
-                    else:
+                        logger.info(f"USERPHON {tex}")
+                        message.content = tex
+                        #await self.reply(message, tex,  _learn, _reply, _store)
                         #hiran his mention check
-                        rep = False
-                        for mention in message.mentions:
-                            if str(mention) == '797884527510290433':
-                                rep = True
-                        await self.reply(message, filtered_content,  _learn, _reply, _store, rep=rep)
+                    rep = False
+                    for mention in message.mentions:
+                        if str(mention) == '797884527510290433':
+                            rep = True
+                    await self.reply(message, filtered_content,  _learn, _reply, _store, rep=rep)
                 except Exception as e:
                     logger.error(str(e))
                     logger.error(traceback.format_exc())
