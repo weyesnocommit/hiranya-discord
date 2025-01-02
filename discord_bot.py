@@ -25,7 +25,6 @@ logging.basicConfig(
     format='[%(asctime)s][%(levelname)s][%(name)s]: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
-logger = logging.getLogger(__name__)
 
 
 conn = sqlite3.connect('./db/optout.db')
@@ -223,7 +222,7 @@ class DiscordClient(discord.Client):
         self.last_message_time = discord.utils.utcnow()
         self.timer_started = False
         self.use_llm = True
-        print(self.llm_cfg)
+        self.logger = logging.getLogger(self.__class__.__name__)
         
         self.patterns = {
             r'<#\d+>': 'DISCORD_CHANNEL',
@@ -289,7 +288,7 @@ class DiscordClient(discord.Client):
                     await self.call_userphone()
                 self.last_message_time = discord.utils.utcnow()  # Reset the timer
             except Exception as e:
-                logger.error(str(e))
+                self.logger.error(str(e))
 
     @timer_task.before_loop
     async def before_timer_task(self):
@@ -317,7 +316,7 @@ class DiscordClient(discord.Client):
                     reply = reply.replace(TURRTURRR, nickname)
             return reply
         except Exception as e:
-            logger.error(e)
+            self.logger.error(e)
             return reply
         
     def tag_patterns(self, text):
@@ -371,7 +370,7 @@ class DiscordClient(discord.Client):
             try:
                 await channel.connect()
             except Exception as e:
-                logger.error(e)
+                self.logger.error(e)
                 await message.channel.send("shit broo exception")
         if message.content.startswith("fuckaoffka") and str(message.author.id) in ['345018122924982276', '142705172395589632', '271323129987465216', "921943732775964673"]:
             if message.guild.voice_client:
@@ -386,7 +385,7 @@ class DiscordClient(discord.Client):
             try:
                 hookid = int(message.content.split('hooker ')[1])
                 self._ok_webhooker.append(hookid)
-                logger.info("NEW HOOKER", self._ok_webhooker)
+                self.logger.info("NEW HOOKER", self._ok_webhooker)
             except ValueError:
                 await message.channel.send("NOTTT HOOKER IT")
                 
@@ -422,9 +421,9 @@ class DiscordClient(discord.Client):
             try:
                 temp_value = float(message.content.split('markov_temp ')[1])
                 self.markov_cfg['markov']['temperature'] = max(0.1, temp_value)
-                logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
+                self.logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
             except Exception as e:
-                logger.info(e)
+                self.logger.info(e)
                 await message.channel.send("AM NITTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH")
 
         if message.content.startswith('markov_strategy '):
@@ -432,36 +431,36 @@ class DiscordClient(discord.Client):
                 temp_value = message.content.split('markov_strategy ')[1]
                 if temp_value in SAMPLING_STRATEGIES:
                     self.markov_cfg['markov']['strategy'] = temp_value
-                    logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
+                    self.logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
             except Exception as e:
-                logger.info(e)
+                self.logger.info(e)
                 await message.channel.send("AM NITTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH")
 
         if message.content.startswith('markov_topp '):
             try:
                 temp_value = float(message.content.split('markov_topp ')[1])
                 self.markov_cfg['markov']['top_p'] = min(max(0.1, temp_value), 1.0)
-                logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
+                self.logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
             except Exception as e:
-                logger.info(e)
+                self.logger.info(e)
                 await message.channel.send("AM NITTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH")
 
         if message.content.startswith('markov_topk '):
             try:
                 temp_value = int(message.content.split('markov_topk ')[1])
                 self.markov_cfg['markov']['top_k'] = max(1, temp_value)
-                logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
+                self.logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
             except Exception as e:
-                logger.info(e)
+                self.logger.info(e)
                 await message
 
         if message.content.startswith('struct_temp '):
             try:
                 temp_value = float(message.content.split('struct_temp ')[1])
                 self.markov_cfg['struct']['temperature'] = max(0.1, temp_value)
-                logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
+                self.logger.info(f"NEW MARKOV CFG {self.markov_cfg}")
             except Exception as e:
-                logger.info(e)
+                self.logger.info(e)
                 await message.channel.send("AM NITTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH")
 
         if message.content == 'llmkaoffka':
@@ -475,7 +474,7 @@ class DiscordClient(discord.Client):
             try:
                 temp_value = float(message.content.split('temp ')[1])
                 self.llm_cfg['temperature'] = max(0.1, temp_value)
-                logger.info(f"NEW TEMPKA {self.llm_cfg['temperature']}")
+                self.logger.info(f"NEW TEMPKA {self.llm_cfg['temperature']}")
             except ValueError:
                 await message.channel.send("INOOO NO YOU WRONGS IT YOU WRONGS IT")
 
@@ -484,7 +483,7 @@ class DiscordClient(discord.Client):
             try:
                 temp_value = int(message.content.split('beam ')[1])
                 self.llm_cfg['num_beams'] = temp_value
-                logger.info("NEW BEAMKA", self.beam)
+                self.logger.info("NEW BEAMKA", self.beam)
             except ValueError:
                 await message.channel.send("INOOO NO YOU WRONGS IT YOU WRONGS IT")
     
@@ -503,7 +502,7 @@ class DiscordClient(discord.Client):
                     self.task = task + ": "
                 if task == "none":
                     self.task = ""
-                logger.info(f"NEW TASKSA {self.task}")
+                self.logger.info(f"NEW TASKSA {self.task}")
                 
             except:
                 await message.channel.send("NOT WRONGS ITS YOU")
@@ -588,7 +587,7 @@ class DiscordClient(discord.Client):
             "from": "hiran"
         }
         response = self.LLM.safe_send(message)
-        logger.info(response)
+        self.logger.info(response)
         return response
     
     def pipe(self, input, pipe= 0):   
@@ -603,7 +602,7 @@ class DiscordClient(discord.Client):
         oky = self.gen_1_t5(input)
         end_time = time.perf_counter()
         
-        logger.info(f"pipe gen time {end_time - start_time:.6f} sekonmd")
+        self.logger.info(f"pipe gen time {end_time - start_time:.6f} sekonmd")
         return oky
     
     
@@ -612,7 +611,7 @@ class DiscordClient(discord.Client):
         # Interfaceka o
     def gen_0(self, text, dmessage, learn, reply, store):
         if not self.MARKOV.is_available or not text:
-            logger.info(f"is availables MARKOVKA: {self.MARKOV.is_available}")
+            self.logger.info(f"is availables MARKOVKA: {self.MARKOV.is_available}")
             return
         dummy = False
         guild = None
@@ -635,12 +634,12 @@ class DiscordClient(discord.Client):
             "store": store,
             "sampling_config": self.markov_cfg
         }
-        logger.info(message)
+        self.logger.info(message)
         start_time = time.perf_counter()
         response = self.MARKOV.safe_send(message)
         end_time = time.perf_counter()
-        logger.info(response)
-        logger.info(f"marlopv gen time {end_time - start_time:.6f} sekonmd")
+        self.logger.info(response)
+        self.logger.info(f"marlopv gen time {end_time - start_time:.6f} sekonmd")
     
         return response    
 
@@ -689,14 +688,14 @@ class DiscordClient(discord.Client):
             
             reply = self.gen_0(sample, message, _learn, _reply, _store)
             if reply is not None:
-                logger.info(f"\nINPUT: {filtered_content}\nCONTX: {sample}\nMARKO: {reply}")
+                self.logger.info(f"\nINPUT: {filtered_content}\nCONTX: {sample}\nMARKO: {reply}")
                 ctx = self.chat_context[channel_id]
                 ctx_authorka = message.author.name
                 ctx_authorka_id = message.author.id
                 input, cnt_ = self.input_fromatter(text=reply, context=ctx, author=ctx_authorka, author_id=ctx_authorka_id)
                 
                 reply_from_pipe = self.pipe(input, self.get_pipe(message.channel.id))
-                logger.info(f"\nCONTX: {cnt_}\nLMGEN: {reply_from_pipe}")
+                self.logger.info(f"\nCONTX: {cnt_}\nLMGEN: {reply_from_pipe}")
                 
                 if reply_from_pipe is not None:
                     similarity = self.check_similarity(filtered_content, reply_from_pipe)
@@ -708,7 +707,7 @@ class DiscordClient(discord.Client):
                     reply = self.harraq_filter.filter_content(reply)
                     if SELF_CONTEXT:
                         self.chat_context[channel_id].append(ctx_authorka_id, self.get_author(message), reply)
-                    logger.info(f"pipe output:::: {reply}")
+                    self.logger.info(f"pipe output:::: {reply}")
                     reply = self.specially_kanal_filter(message, reply)
                     
                 if rep:
@@ -813,14 +812,14 @@ class DiscordClient(discord.Client):
                         #pattern2 = r"(.+) <:userphone:\d{18}> (.*)"
                         #match2 = re.search(pattern, filtered_content)
                         #if match2 or match1:
-                        #    logger.info("YAP")
+                        #    self.logger.info("YAP")
                         tex = filtered_content.split("<:userphone:1311268018625576971>")
-                        logger.info(tex)
+                        self.logger.info(tex)
                         if len(tex) > 1:
                             tex = tex[1]
                         else:
                             tex = filtered_content
-                        logger.info(f"USERPHON {tex}")
+                        self.logger.info(f"USERPHON {tex}")
                         message.content = tex
                         #await self.reply(message, tex,  _learn, _reply, _store)
                         #hiran his mention check
@@ -830,12 +829,12 @@ class DiscordClient(discord.Client):
                             rep = True
                     await self.reply(message, filtered_content,  _learn, _reply, _store, rep=rep)
                 except Exception as e:
-                    logger.error(str(e))
-                    logger.error(traceback.format_exc())
-                    #logger.info("Forbidden" in str(e) or "forbidden" in str(e).lower())
+                    self.logger.error(str(e))
+                    self.logger.error(traceback.format_exc())
+                    #self.logger.info("Forbidden" in str(e) or "forbidden" in str(e).lower())
                     if "Forbidden" in str(e):
                         self.badka.append(message.channel.id)
-                        logger.info(self.badka)
+                        self.logger.info(self.badka)
             return
 
         # Reply to private messages
