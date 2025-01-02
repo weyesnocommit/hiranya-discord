@@ -117,50 +117,48 @@ class Context():
             return result
 
 class ZMQClient:
-    def __init__(self, port, layer_name, heartbeat_interval=60):
-        import threading
+    def __init__(self, port, layer_name, heartbeat_interval=60, timeout=60):
         self.port = port
         self.layer_name = layer_name
         self.heartbeat_interval = heartbeat_interval
+        self.timeout = timeout
         self.context = zmq.Context()
         self.socket = self.create_zmq_socket()
-        #thread = threading.Thread(target=self.run_loop)
-        #thread.start()
+        self.is_available = True
+        self.logger = logging.getLogger(self.__class__.__name__)
         
     async def start(self, loop):
         loop.create_task(self.heartbeat_task())
-        
-    def run_loop(self):
-        try:
-            self.loop.run_forever()
-        finally:
-            self.loop.close()
 
     def create_zmq_socket(self):
         socket = self.context.socket(zmq.REQ)
-        socket.setsockopt(zmq.RCVTIMEO, GEN_TIME_LIMIT)
+        socket.setsockopt(zmq.RCVTIMEO, self.timeout)
         socket.connect(f"tcp://127.0.0.1:{self.port}")
         return socket
 
     def safe_send(self, message):
         try:
+            self.is_available = True
             packed_data = msgpack.packb(message)
             self.socket.send(packed_data)
             response = self.socket.recv()
             return msgpack.unpackb(response)
         except zmq.Again as e:
-            logging.error(f"Timeout while waiting for a response: {e}")
+            self.is_available = False
+            self.logger.error(f"Timeout while waiting for a response: {e}")
             return None
         except zmq.ZMQError as e:
-            logging.error(f"ZMQ Error: {e}, attempting to reconnect...")
+            self.is_available = False
+            self.logger.error(f"ZMQ Error: {e}, attempting to reconnect...")
             self.reconnect_socket()
             return None
         except Exception as e:
-            logging.error(f"Error sending message: {e}")
+            self.is_available = False
+            self.logger.error(f"Error sending message: {e}")
             return None
 
     def reconnect_socket(self):
-        logging.error(f"Reconnecting {self.layer_name} socket")
+        self.logger.debug(f"Reconnecting {self.layer_name} socket")
         self.socket.close()
         self.socket = self.create_zmq_socket()
 
@@ -170,12 +168,15 @@ class ZMQClient:
             try:
                 response = self.safe_send({"from": "hiran", "type": "ping"})
                 if response:
-                    logging.info(f"Heartbeat response from {self.layer_name}: {response}")
+                    self.is_available = True
+                    self.logger.debug(f"Heartbeat response from {self.layer_name}: {response}")
                 else:
-                    logging.error(f"No response from {self.layer_name} during heartbeat")
+                    self.is_available = False
+                    self.logger.error(f"No response from {self.layer_name} during heartbeat")
             except Exception as e:
-                logging.error(traceback.format_exc())
-                logging.error(f"Failed heartbeat for {self.layer_name}")
+                self.is_available = False
+                self.logger.error(traceback.format_exc())
+                self.logger.error(f"Failed heartbeat for {self.layer_name}")
                 self.reconnect_socket()
 
         
@@ -221,7 +222,6 @@ class DiscordClient(discord.Client):
         self.message_channel = None
         self.last_message_time = discord.utils.utcnow()
         self.timer_started = False
-        self.layer_state = {"LLM": True, "MARKOV": True}
         self.use_llm = True
         print(self.llm_cfg)
         
@@ -235,8 +235,8 @@ class DiscordClient(discord.Client):
             "MARKOV": zmq.Context(),
             "LLM": zmq.Context()
         }
-        self.LLM = ZMQClient(TOP_LAYER_PORT, "LLM", heartbeat_interval=HEART_BET_GREQ)
-        self.MARKOV = ZMQClient(MARKOV_PORT, "MARKOV", heartbeat_interval=HEART_BET_GREQ)
+        self.LLM = ZMQClient(TOP_LAYER_PORT, "LLM", heartbeat_interval=HEART_BET_GREQ, timeout=GEN_TIME_LIMIT)
+        self.MARKOV = ZMQClient(MARKOV_PORT, "MARKOV", heartbeat_interval=HEART_BET_GREQ, timeout=GEN_TIME_LIMIT)
 
     async def on_thread_join(self, thread):
         await thread.join()
@@ -536,7 +536,7 @@ class DiscordClient(discord.Client):
         return fixed_message
     
     def input_fromatter(self, text, context = "", author="harraq", author_id=138308895834767360):
-        if not self.layer_state['LLM']:
+        if not self.LLM.is_available:
             return text
         formatted = text
         ctx = ""
@@ -561,7 +561,7 @@ class DiscordClient(discord.Client):
         return formatted, ctx
         
     def output_fromatter(self, text):
-        if not self.layer_state['LLM']:
+        if not self.LLM.is_available:
             return text
         if self.model == 't5-mihm':
             pattern = r"(?<!<):(\w+):(\d+)(?=>|$)"
@@ -576,8 +576,7 @@ class DiscordClient(discord.Client):
         
     # upper lyaer
     def gen_1_t5(self, text: str):
-        print("AM HERES", self.layer_state)
-        if not self.layer_state['LLM']:
+        if not self.LLM.is_available:
             return text
         if not text:
             return None
@@ -612,8 +611,8 @@ class DiscordClient(discord.Client):
     
         # Interfaceka o
     def gen_0(self, text, dmessage, learn, reply, store):
-        if not self.layer_state['MARKOV'] or not text:
-            logger.info(f"is availables MARKOVKA: {self.layer_state['MARKOV']}")
+        if not self.MARKOV.is_available or not text:
+            logger.info(f"is availables MARKOVKA: {self.MARKOV.is_available}")
             return
         dummy = False
         guild = None
