@@ -14,8 +14,11 @@ from capture_filter import MessageFilter
 import logging
 import asyncio
 import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 SAMPLING_STRATEGIES = ['softmax', 'top_p', 'top_k', 'greedy', 'random', 'top_p_k']
+MODELKAS = []
 
 logging.basicConfig(
     level=logging.INFO,
@@ -92,7 +95,7 @@ class Context():
             result = f"{sep}".join(f"{i[2]}" for i in sampled_items)
             return result
 
-    def last_n(self, n=3, sep=". ", names= True, namesep=": ", ids=False, filter_out_ids=None):
+    def last_n(self, n=3, sep=". ", names= True, namesep=": ", ids=False, filter_out_ids=None, reverse=False):
         if not filter_out_ids:
             filter_out_ids = []
             
@@ -101,6 +104,8 @@ class Context():
             return self.last
 
         last_three = items[-n:] #items[-4:-1] if len(items) >= 4 else items[:-1]
+        if reverse:
+            last_three = last_three[::-1]
         if names and not ids:
             result = f"{sep}".join([f"{item[1]}{namesep}{item[2]}" for item in last_three if item[0] not in filter_out_ids])
             return result
@@ -112,6 +117,59 @@ class Context():
             return result
 
 
+class ZMQClient:
+    def __init__(self, layer_name, port, gen_time_limit):
+        self.layer_name = layer_name
+        self.port = port
+        self.gen_time_limit = gen_time_limit
+        self.context = zmq.Context()
+        self.socket = self.create_zmq_socket()
+        self.heartbeat_task = None
+
+    def create_zmq_socket(self):
+        """Create a ZeroMQ socket."""
+        self.socket.connect(f"tcp://127.0.0.1:{self.port = self.port
+        return self.socket
+
+    async def start_heartbeat(self, interval):
+        """Start the heartbeat task."""
+        self.heartbeat_task = asyncio.sleep(interval)
+                await self.check_heartbeat()
+                logger.info(f"Heartbeat successful for {self.layer_name}.")
+            else:
+                logger.error(f"Heartbeat failed for {self.layer_name}.")
+                self.reconnect_socket()
+
+    async def check_heartbeat(self):
+        """Check the heartbeat."""
+        return self.socket
+
+    def stop_heartbeat(self):
+        """Stop the heartbeat task."""
+        self.heartbeat_task.cancel()
+
+    async def start(self):
+        """Start the heartbeat task."""
+        self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
+    async def _heartbeat_loop(self):
+        while True:
+            try:
+                await self.check_heartbeat()
+                await asyncio.sleep(HEART_BET_GREQ)
+            except Exception as e:
+                logger.error(f"Heartbeat error: {e}")
+                self.reconnect_socket()
+
+    def pack_and_send(self, data):
+        """Pack and send data."""
+        return self.safe_send(data)
+
+    def reconnect_socket(self):
+        """Reconnect the socket."""
+        self.socket.close()
+        self.socket = self.create_zmq_socket()
+        
 class DiscordClient(discord.Client):
     _channel_tasks = {}
     muhharaq = "business on the business"
@@ -120,26 +178,27 @@ class DiscordClient(discord.Client):
     markov_topics = {}
     pipes = {}
     llm_cfg =  {
-        "temperature" : 2.0,
-        'max_new_tokens': 250,
-        'num_beams': 2,
-        'repetition_penalty': 1.05
+        "temperature" : 1.9,
+        'max_new_tokens': 512,
+        'num_beams': 6,
+        'repetition_penalty': 1.01,
+        'top_p': 0.9,
+        'top_k': 100
     }
     markov_cfg = {
         'markov': {
-            'strategy': SAMPLING_STRATEGIES[5],
-            "temperature": 1.6,
+            'strategy': SAMPLING_STRATEGIES[1],
+            "temperature": 1.1,
             'top_k': 100,
             'top_p': 0.9
         },
         'struct': {
-            'strategy': SAMPLING_STRATEGIES[5],
-            "temperature": 0.6,
+            'strategy': SAMPLING_STRATEGIES[1],
+            "temperature": 0.8,
             'top_k': 100,
             'top_p': 0.9
         }
     }
-    models = ["t5-cg-1.0", "t5-mihm", "t5-gcc-03", "flant5-gcc-01", "checkpoint-16500"]
     
     harraq_filter = MessageFilter()
     _ok_webhooker = WEBHOOKER_WHITELISTKA
@@ -147,7 +206,7 @@ class DiscordClient(discord.Client):
 
     def __init__(self, intents):
         super().__init__(intents=intents)
-        self.model = self.models[0]
+        self.model = None
         self.ready = False
         self.timeout_duration = 60*60*1
         self.message_channel = None
@@ -175,10 +234,15 @@ class DiscordClient(discord.Client):
         await thread.send(f"wecloomes mysekf")
         
     async def on_ready(self):
+        global MODELKAS
+        MODELKAS = await self.safe_send(self.top_layer_socket, {"from": "hiran", "type": "get_models"}, "LLM")
+        self.model = MODELKAS[0]
+        print(MODELKAS)
         print(" ===========================================AM READINGSONSS")
         self.ready = True
         self.timer_task.start()
         self.heartbeat_task.start()
+        self.get_models_task.start()
         
         if USERPHONE_CHANNEL:
             await self.call_userphone()
@@ -249,6 +313,11 @@ class DiscordClient(discord.Client):
             logger.error(f"Error sending message: {e}")
             return None
         
+    @tasks.loop(seconds=60*5)
+    async def get_models_task(self):
+        global MODELKAS
+        MODELKAS = await self.safe_send(self.top_layer_socket, {"from": "hiran", "type": "get_models"}, "LLM")
+        
     @tasks.loop(seconds=HEART_BET_GREQ)
     async def heartbeat_task(self):
         await self.check_heartbeat(self.top_layer_socket, "LLM")
@@ -256,7 +325,7 @@ class DiscordClient(discord.Client):
 
     async def check_heartbeat(self, socket, layer_name):
         try:
-            response = await self.safe_send(socket, {"to": "hiran", "type": "ping"}, layer_name)
+            response = await self.safe_send(socket, {"from": "hiran", "type": "ping"}, layer_name)
             if response:
                 self.layer_state[layer_name] = True
                 logger.info(f"{layer_name} response: {response}")
@@ -464,7 +533,7 @@ class DiscordClient(discord.Client):
             try:
                 temp_value = float(message.content.split('temp ')[1])
                 self.llm_cfg['temperature'] = max(0.1, temp_value)
-                logger.info(f"NEW TEMPKA {self.temp}")
+                logger.info(f"NEW TEMPKA {self.llm_cfg['temperature']}")
             except ValueError:
                 await message.channel.send("INOOO NO YOU WRONGS IT YOU WRONGS IT")
 
@@ -480,7 +549,7 @@ class DiscordClient(discord.Client):
         if message.content.startswith('modelka '):
             try:
                 model = message.content.split("modelka ")[1]
-                if model in self.models:
+                if model in MODELKAS:
                     self.model = model
             except:
                 await message.channel.send("YOU NOT CORECT")
@@ -524,8 +593,10 @@ class DiscordClient(discord.Client):
         fixed_message = re.sub(broken_mention_pattern, r'<\1', message)
         return fixed_message
     
-    def input_fromatter(self, text, context = ""):
-        formatted = "AMNOT"
+    def input_fromatter(self, text, context = "", author="harraq", author_id=138308895834767360):
+        if not self.layer_state['LLM']:
+            return text
+        formatted = text
         ctx = ""
         if self.model == 't5-mihm':
             return self.task+text
@@ -539,15 +610,25 @@ class DiscordClient(discord.Client):
         elif self.model in ['t5-cg-1.0',  "checkpoint-16500"]:
             ctx = context.last_n(7, sep=chr(10), names=True, namesep="</msg>", ids=True)
             formatted = f'grammar: {text} context:\n\n{ctx} </s>'
+        elif self.model == 't5-common-gen':
+            ctx = context.last_n(3, sep=" ")
+            formatted = f'{text}'
+        elif self.model == 't5-cbcg':
+            ctx = context.last_n(7, sep=chr(10), names=True, namesep="</msg>", ids=True, reverse=True)
+            formatted = f'grammar:</uid>{author_id}</name>{author}</msg>{text.replace("<", "&lt;")}</end>{ctx} </s>'
         return formatted, ctx
         
     def output_fromatter(self, text):
+        if not self.layer_state['LLM']:
+            return text
         if self.model == 't5-mihm':
             pattern = r"(?<!<):(\w+):(\d+)(?=>|$)"
             repaired_text = re.sub(pattern, r"<:\1:\2>", text)
             return repaired_text
         elif self.model in ['t5-gcc-03', 't5-cg-1.0']:
             return self.fix_refs(self.repair_discord_mentions(text))
+        elif self.model == 't5-cbcg':
+            return text.replace("&lt;", "<")
         else:
             return text
         
@@ -638,31 +719,58 @@ class DiscordClient(discord.Client):
         except:
             return message.author.name
     
+    def check_similarity(self, message, reply_from_pipe):
+        """
+        Compare the similarity between the input message and the reply from the pipe.
+        """
+        vectorizer = TfidfVectorizer().fit_transform([message, reply_from_pipe])
+        similarity_matrix = cosine_similarity(vectorizer[0:1], vectorizer[1:2])
+        return similarity_matrix[0][0]
+    
+    def get_author(self, message):
+        author = message.author.name
+        logger.info("OKEE", author)
+        try:
+            author_ = message.author.nick
+            if author_ is not None:
+                author = author_
+            else:
+                author = message.author.display_name
+        except:
+            logger.info("XDDD NOTT NICK")
+        return author
+
     # d breads and butters
-    async def reply(self, message, filtered_content, _learn:bool, _reply:bool, _store:bool, prefix = '', rep = False):
+    async def reply(self, message, filtered_content, _learn: bool, _reply: bool, _store: bool, prefix='', rep=False):
         async with message.channel.typing():
             channel_id = str(message.channel.id)
-            
-            sample = ". ".join(self.markov_topics[channel_id]) #self.chat_context[str(message.channel.id)].last_n(3, sep=". ", names=False, filter_out_ids=[797884527510290433]) #.sample_n(random.randint(3,10), ". ", False)
+            sample = ". ".join(self.markov_topics[channel_id])
             self.markov_topics[channel_id] = []
             
             reply = self.gen_0(sample, message, _learn, _reply, _store)
-
-            #replyka            
             if reply is not None:
                 logger.info(f"\nINPUT: {filtered_content}\nCONTX: {sample}\nMARKO: {reply}")
-                #reply = f"question: {reply}? context: {sample}"
                 ctx = self.chat_context[channel_id]
-                input, cnt_ = self.input_fromatter(reply, ctx)
-                reply = self.pipe(input, self.get_pipe(message.channel.id))
-                logger.info(f"\nCONTX: {cnt_}\nLMGEN: {reply}")
-                if reply is not None:
-                    reply = self.output_fromatter(reply)
+                ctx_authorka = message.author.name
+                ctx_authorka_id = message.author.id
+                input, cnt_ = self.input_fromatter(text=reply, context=ctx, author=ctx_authorka, author_id=ctx_authorka_id)
+                
+                reply_from_pipe = self.pipe(input, self.get_pipe(message.channel.id))
+                logger.info(f"\nCONTX: {cnt_}\nLMGEN: {reply_from_pipe}")
+                
+                if reply_from_pipe is not None:
+                    similarity = self.check_similarity(filtered_content, reply_from_pipe)
+                    print(f"similarity: {filtered_content}, {reply_from_pipe}, {similarity}")
+                    if similarity < 0.8:
+                        reply = reply_from_pipe
+                        reply = self.output_fromatter(reply)
+                        
                     reply = self.harraq_filter.filter_content(reply)
                     if SELF_CONTEXT:
-                        self.chat_context[channel_id].append(797884527510290433, "hiranya", reply)
-                    logger.info(f"pipe outpu:::: {reply}")
+                        self.chat_context[channel_id].append(ctx_authorka_id, self.get_author(message), reply)
+                    logger.info(f"pipe output:::: {reply}")
                     reply = self.specially_kanal_filter(message, reply)
+                    
                 if rep:
                     await message.reply(reply)
                 else:
@@ -795,4 +903,5 @@ class DiscordClient(discord.Client):
             await self.reply(message, filtered_content,  _learn, _reply, _store)
 
 client = DiscordClient(intents=None)
+
 client.run(DISCORD_TOKEN)
