@@ -118,13 +118,23 @@ class Context():
 
 class ZMQClient:
     def __init__(self, port, layer_name, heartbeat_interval=60):
+        import threading
         self.port = port
         self.layer_name = layer_name
         self.heartbeat_interval = heartbeat_interval
         self.context = zmq.Context()
         self.socket = self.create_zmq_socket()
-        self.loop = asyncio.get_event_loop()
-        self.loop.create_task(self.heartbeat_task())
+        #thread = threading.Thread(target=self.run_loop)
+        #thread.start()
+        
+    async def start(self, loop):
+        loop.create_task(self.heartbeat_task())
+        
+    def run_loop(self):
+        try:
+            self.loop.run_forever()
+        finally:
+            self.loop.close()
 
     def create_zmq_socket(self):
         socket = self.context.socket(zmq.REQ)
@@ -155,9 +165,7 @@ class ZMQClient:
         self.socket = self.create_zmq_socket()
 
     async def heartbeat_task(self):
-        print("am try am2")
         while True:
-            print("am try am")
             await asyncio.sleep(self.heartbeat_interval)
             try:
                 response = self.safe_send({"from": "hiran", "type": "ping"})
@@ -236,6 +244,8 @@ class DiscordClient(discord.Client):
         
     async def on_ready(self):
         global MODELKAS
+        await self.LLM.start(self.loop)
+        await self.MARKOV.start(self.loop)
         MODELKAS = self.LLM.safe_send({"from": "hiran", "type": "get_models"})
         self.model = MODELKAS[0]
         print(MODELKAS)
