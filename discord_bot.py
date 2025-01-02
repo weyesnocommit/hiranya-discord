@@ -116,59 +116,60 @@ class Context():
             result = f"{sep}".join([item[2] for item in last_three if item[0] not in filter_out_ids])
             return result
 
-
 class ZMQClient:
-    def __init__(self, layer_name, port, gen_time_limit):
-        self.layer_name = layer_name
+    def __init__(self, port, layer_name, heartbeat_interval=60):
         self.port = port
-        self.gen_time_limit = gen_time_limit
+        self.layer_name = layer_name
+        self.heartbeat_interval = heartbeat_interval
         self.context = zmq.Context()
         self.socket = self.create_zmq_socket()
-        self.heartbeat_task = None
+        self.loop = asyncio.get_event_loop()
+        self.loop.create_task(self.heartbeat_task())
 
     def create_zmq_socket(self):
-        """Create a ZeroMQ socket."""
-        self.socket.connect(f"tcp://127.0.0.1:{self.port = self.port
-        return self.socket
+        socket = self.context.socket(zmq.REQ)
+        socket.setsockopt(zmq.RCVTIMEO, GEN_TIME_LIMIT)
+        socket.connect(f"tcp://127.0.0.1:{self.port}")
+        return socket
 
-    async def start_heartbeat(self, interval):
-        """Start the heartbeat task."""
-        self.heartbeat_task = asyncio.sleep(interval)
-                await self.check_heartbeat()
-                logger.info(f"Heartbeat successful for {self.layer_name}.")
-            else:
-                logger.error(f"Heartbeat failed for {self.layer_name}.")
-                self.reconnect_socket()
-
-    async def check_heartbeat(self):
-        """Check the heartbeat."""
-        return self.socket
-
-    def stop_heartbeat(self):
-        """Stop the heartbeat task."""
-        self.heartbeat_task.cancel()
-
-    async def start(self):
-        """Start the heartbeat task."""
-        self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-
-    async def _heartbeat_loop(self):
-        while True:
-            try:
-                await self.check_heartbeat()
-                await asyncio.sleep(HEART_BET_GREQ)
-            except Exception as e:
-                logger.error(f"Heartbeat error: {e}")
-                self.reconnect_socket()
-
-    def pack_and_send(self, data):
-        """Pack and send data."""
-        return self.safe_send(data)
+    def safe_send(self, message):
+        try:
+            packed_data = msgpack.packb(message)
+            self.socket.send(packed_data)
+            response = self.socket.recv()
+            return msgpack.unpackb(response)
+        except zmq.Again as e:
+            logging.error(f"Timeout while waiting for a response: {e}")
+            return None
+        except zmq.ZMQError as e:
+            logging.error(f"ZMQ Error: {e}, attempting to reconnect...")
+            self.reconnect_socket()
+            return None
+        except Exception as e:
+            logging.error(f"Error sending message: {e}")
+            return None
 
     def reconnect_socket(self):
-        """Reconnect the socket."""
+        logging.error(f"Reconnecting {self.layer_name} socket")
         self.socket.close()
         self.socket = self.create_zmq_socket()
+
+    async def heartbeat_task(self):
+        print("am try am2")
+        while True:
+            print("am try am")
+            await asyncio.sleep(self.heartbeat_interval)
+            try:
+                response = self.safe_send({"from": "hiran", "type": "ping"})
+                if response:
+                    logging.info(f"Heartbeat response from {self.layer_name}: {response}")
+                else:
+                    logging.error(f"No response from {self.layer_name} during heartbeat")
+            except Exception as e:
+                logging.error(traceback.format_exc())
+                logging.error(f"Failed heartbeat for {self.layer_name}")
+                self.reconnect_socket()
+
         
 class DiscordClient(discord.Client):
     _channel_tasks = {}
@@ -226,8 +227,8 @@ class DiscordClient(discord.Client):
             "MARKOV": zmq.Context(),
             "LLM": zmq.Context()
         }
-        self.markov_socket = self.create_zmq_socket(MARKOV_PORT, "MARKOV")
-        self.top_layer_socket = self.create_zmq_socket(TOP_LAYER_PORT, "LLM")
+        self.LLM = ZMQClient(TOP_LAYER_PORT, "LLM", heartbeat_interval=HEART_BET_GREQ)
+        self.MARKOV = ZMQClient(MARKOV_PORT, "MARKOV", heartbeat_interval=HEART_BET_GREQ)
 
     async def on_thread_join(self, thread):
         await thread.join()
@@ -235,14 +236,12 @@ class DiscordClient(discord.Client):
         
     async def on_ready(self):
         global MODELKAS
-        MODELKAS = await self.safe_send(self.top_layer_socket, {"from": "hiran", "type": "get_models"}, "LLM")
+        MODELKAS = self.LLM.safe_send({"from": "hiran", "type": "get_models"})
         self.model = MODELKAS[0]
         print(MODELKAS)
         print(" ===========================================AM READINGSONSS")
         self.ready = True
         self.timer_task.start()
-        self.heartbeat_task.start()
-        self.get_models_task.start()
         
         if USERPHONE_CHANNEL:
             await self.call_userphone()
@@ -289,74 +288,7 @@ class DiscordClient(discord.Client):
     ###################### STOP TOFI USERPHONE yayf ######################
     
     ###################### START TOFI ZMQ stufyf ######################
-    
-    def create_zmq_socket(self, port, layer_name):
-        socket = self.zmq_context[layer_name].socket(zmq.REQ)
-        socket.setsockopt(zmq.RCVTIMEO, GEN_TIME_LIMIT)
-        socket.connect(f"tcp://127.0.0.1:{port}")
-        return socket
-    
-    async def safe_send(self, socket, message, layer_name):
-        try:
-            packed_data = msgpack.packb(message)
-            socket.send(packed_data)
-            response = socket.recv()
-            return msgpack.unpackb(response)
-        except zmq.Again as e:
-            logger.error(f"Timeout while waiting for a response: {e}")
-            return None
-        except zmq.ZMQError as e:
-            logger.error(f"ZMQ Error: {e}, attempting to reconnect...")
-            self.reconnect_socket(socket, layer_name)
-            return None
-        except Exception as e:
-            logger.error(f"Error sending message: {e}")
-            return None
-        
-    @tasks.loop(seconds=60*5)
-    async def get_models_task(self):
-        global MODELKAS
-        MODELKAS = await self.safe_send(self.top_layer_socket, {"from": "hiran", "type": "get_models"}, "LLM")
-        
-    @tasks.loop(seconds=HEART_BET_GREQ)
-    async def heartbeat_task(self):
-        await self.check_heartbeat(self.top_layer_socket, "LLM")
-        await self.check_heartbeat(self.markov_socket, "MARKOV")
 
-    async def check_heartbeat(self, socket, layer_name):
-        try:
-            response = await self.safe_send(socket, {"from": "hiran", "type": "ping"}, layer_name)
-            if response:
-                self.layer_state[layer_name] = True
-                logger.info(f"{layer_name} response: {response}")
-            else:
-                self.layer_state[layer_name] = False
-                logger.error(f"No response from {layer_name}")
-        except Exception as e:
-            self.layer_state[layer_name] = False
-            logger.error(traceback.format_exc())
-            logger.error(f"Failed heartbeat for {layer_name}")
-            self.reconnect_socket(socket, layer_name)
-
-    def reconnect_socket(self, socket, layer_name):
-        logger.error(f"Reconnecting {layer_name} socket")
-        socket.close()
-        if layer_name == "LLM":
-            self.top_layer_socket = self.create_zmq_socket(TOP_LAYER_PORT, layer_name)
-        elif layer_name == "MARKOV":
-            self.markov_socket = self.create_zmq_socket(MARKOV_PORT, layer_name)
-
-    def pack_and_send(self, socket, data):
-        try:
-            packed_data = msgpack.packb(data)
-            socket.send(packed_data)
-            packed_response = socket.recv()
-            response = msgpack.unpackb(packed_response)
-            return response
-        except Exception as e:
-            logger.error(e)
-            return None
-    
 
 
         
@@ -646,7 +578,7 @@ class DiscordClient(discord.Client):
             "config" : self.llm_cfg,
             "from": "hiran"
         }
-        response = self.pack_and_send(self.top_layer_socket, message)
+        response = self.LLM.safe_send(message)
         logger.info(response)
         return response
     
@@ -696,7 +628,7 @@ class DiscordClient(discord.Client):
         }
         logger.info(message)
         start_time = time.perf_counter()
-        response = self.pack_and_send(self.markov_socket, message)
+        response = self.MARKOV.safe_send(message)
         end_time = time.perf_counter()
         logger.info(response)
         logger.info(f"marlopv gen time {end_time - start_time:.6f} sekonmd")
@@ -729,7 +661,6 @@ class DiscordClient(discord.Client):
     
     def get_author(self, message):
         author = message.author.name
-        logger.info("OKEE", author)
         try:
             author_ = message.author.nick
             if author_ is not None:
@@ -737,7 +668,7 @@ class DiscordClient(discord.Client):
             else:
                 author = message.author.display_name
         except:
-            logger.info("XDDD NOTT NICK")
+            1+1
         return author
 
     # d breads and butters
