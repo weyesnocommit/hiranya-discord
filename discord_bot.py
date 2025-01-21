@@ -14,6 +14,7 @@ from capture_filter import MessageFilter
 import logging
 import asyncio
 import numpy as np
+import os
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -109,7 +110,9 @@ class Context():
             result = f"{sep}".join([f"{item[1]}{namesep}{item[2]}" for item in last_three if item[0] not in filter_out_ids])
             return result
         if names and ids:
-            result = f"{sep}".join([f"{item[0]}</uid>{item[1]}{namesep}{item[2]}" for item in last_three if item[0] not in filter_out_ids])
+            def sanitize(item):
+                return item.replace("<", "&lt;")
+            result = f"{sep}".join([f"</uid>{item[0]}</name>{item[1]}</msg>{sanitize(item[2])}" for item in last_three if item[0] not in filter_out_ids])
             return result
         else:
             result = f"{sep}".join([item[2] for item in last_three if item[0] not in filter_out_ids])
@@ -181,31 +184,33 @@ class ZMQClient:
         
 class DiscordClient(discord.Client):
     _channel_tasks = {}
+    _pending_messages = {}
+    _skipped_messages_count = {}
     muhharaq = "business on the business"
     badka = []
     chat_context = {}
     markov_topics = {}
     pipes = {}
     llm_cfg =  {
-        "temperature" : 1.9,
+        "temperature" : 1.3,
         'max_new_tokens': 512,
-        'num_beams': 6,
+        'num_beams': 2,
         'repetition_penalty': 1.01,
         'top_p': 0.9,
         'top_k': 100
     }
     markov_cfg = {
         'markov': {
-            'strategy': SAMPLING_STRATEGIES[1],
+            'strategy': SAMPLING_STRATEGIES[0],
             "temperature": 1.1,
             'top_k': 100,
-            'top_p': 0.9
+            'top_p': 1.2
         },
         'struct': {
-            'strategy': SAMPLING_STRATEGIES[1],
+            'strategy': SAMPLING_STRATEGIES[0],
             "temperature": 0.8,
             'top_k': 100,
-            'top_p': 0.9
+            'top_p': 1.2
         }
     }
     
@@ -223,7 +228,6 @@ class DiscordClient(discord.Client):
         self.timer_started = False
         self.use_llm = True
         self.logger = logging.getLogger(self.__class__.__name__)
-        
         self.patterns = {
             r'<#\d+>': 'DISCORD_CHANNEL',
             r'<@\d+>': 'DISCORD_MENTION',
@@ -246,7 +250,7 @@ class DiscordClient(discord.Client):
         await self.LLM.start(self.loop)
         await self.MARKOV.start(self.loop)
         MODELKAS = self.LLM.safe_send({"from": "hiran", "type": "get_models"})
-        self.model = MODELKAS[0]
+        self.model = MODELKAS[1]
         print(MODELKAS)
         print(" ===========================================AM READINGSONSS")
         self.ready = True
@@ -536,7 +540,7 @@ class DiscordClient(discord.Client):
     
     def input_fromatter(self, text, context = "", author="harraq", author_id=138308895834767360):
         if not self.LLM.is_available:
-            return text
+            return text, context
         formatted = text
         ctx = ""
         if self.model == 't5-mihm':
@@ -557,7 +561,74 @@ class DiscordClient(discord.Client):
         elif self.model == 't5-cbcg':
             ctx = context.last_n(7, sep=chr(10), names=True, namesep="</msg>", ids=True, reverse=True)
             formatted = f'grammar:</uid>{author_id}</name>{author}</msg>{text.replace("<", "&lt;")}</end>{ctx} </s>'
+        elif self.model == 't5-cbcg-v2':
+            ctx = context.last_n(5, sep=chr(10), names=True, namesep="</msg>", ids=True, reverse=True)
+            flat_context = self.flatten_chat(ctx)
+            formatted = f'grammar:</uid>{author_id}</name>{author}</msg>{text.replace("<", "&lt;")}</end>{flat_context} </s>'
         return formatted, ctx
+    
+    def flatten_chat(self, chat_log):
+        """
+        Flattens consecutive messages from the same author into single lines.
+        
+        Args:
+            chat_log (str): The raw chat log text
+            
+        Returns:
+            str: Flattened chat log where consecutive messages from the same author
+                are combined into single lines
+        """
+        # Split into messages and extract components
+        messages = []
+        
+        # Split by </uid> but keep the tag
+        parts = chat_log.split("</uid>")
+        for part in parts[1:]:  # Skip the first empty part
+            try:
+                # Split the parts
+                name_part = part.split("</name>", 1)
+                msg_part = name_part[1].split("</msg>", 1)
+                
+                # Extract the components
+                uid = name_part[0].strip()
+                name = msg_part[0].strip()
+                message = msg_part[1].strip()
+                
+                messages.append({
+                    'uid': uid,
+                    'name': name,
+                    'message': message
+                })
+            except (IndexError, ValueError):
+                continue
+
+        # Group and combine messages by author
+        flattened = []
+        current_author = None
+        current_messages = []
+        current_uid = None
+        
+        for msg in messages:
+            if msg['name'] != current_author:
+                # Add previous author's combined messages
+                if current_messages:
+                    combined = f"</uid>{current_uid}</name>{current_author}</msg>{'<buferia>'.join(current_messages)}"
+                    flattened.append(combined)
+                # Start new author's messages
+                current_author = msg['name']
+                current_uid = msg['uid']
+                current_messages = [msg['message'].replace("<", "&lt;")]
+            else:
+                # Add to current author's messages
+                current_messages.append(msg['message'].replace("<", "&lt;"))
+        
+        # Add the last author's messages
+        if current_messages:
+            combined = f"</uid>{current_uid}</name>{current_author}</msg>{'<buferia>'.join(current_messages)}"
+            flattened.append(combined)
+        
+        return '\n'.join(flattened)
+    
         
     def output_fromatter(self, text):
         if not self.LLM.is_available:
@@ -565,14 +636,16 @@ class DiscordClient(discord.Client):
         if self.model == 't5-mihm':
             pattern = r"(?<!<):(\w+):(\d+)(?=>|$)"
             repaired_text = re.sub(pattern, r"<:\1:\2>", text)
-            return repaired_text
+            text = repaired_text
         elif self.model in ['t5-gcc-03', 't5-cg-1.0']:
-            return self.fix_refs(self.repair_discord_mentions(text))
-        elif self.model == 't5-cbcg':
-            return text.replace("&lt;", "<")
-        else:
-            return text
-        
+            text = self.fix_refs(self.repair_discord_mentions(text))
+        elif self.model == 't5-cbcg' or self.model == 't5-cbcg-v2':
+            text = text.replace("&lt;", "<")
+        text = text.replace("<pad>", "")
+        text = text.replace("</s>", "")
+        text = text.replace("<unk>", "<")
+        return text
+                
     # upper lyaer
     def gen_1_t5(self, text: str):
         if not self.LLM.is_available:
@@ -680,41 +753,75 @@ class DiscordClient(discord.Client):
         return author
 
     # d breads and butters
-    async def reply(self, message, filtered_content, _learn: bool, _reply: bool, _store: bool, prefix='', rep=False):
-        async with message.channel.typing():
-            channel_id = str(message.channel.id)
-            sample = ". ".join(self.markov_topics[channel_id])
-            self.markov_topics[channel_id] = []
+    async def reply(self, message, filtered_content, _learn: bool, _reply: bool, _store: bool, prefix='', is_rep=False):
+        #async with message.channel.typing():
+        channel_id = str(message.channel.id)
+        sample = ". ".join(self.markov_topics[channel_id])
+        self.markov_topics[channel_id] = []
+        
+        reply = self.gen_0(sample, message, _learn, _reply, _store)
+        if reply is not None:
+            self.logger.info(f"\nINPUT: {filtered_content}\nCONTX: {sample}\nMARKO: {reply}")
+            ctx = self.chat_context[channel_id]
+            #ctx_authorka = message.author.name
+            #ctx_authorka_id = message.author.id
+            input, cnt_ = self.input_fromatter(text=reply, context=ctx, author="hiranya", author_id=797884527510290433)
             
-            reply = self.gen_0(sample, message, _learn, _reply, _store)
-            if reply is not None:
-                self.logger.info(f"\nINPUT: {filtered_content}\nCONTX: {sample}\nMARKO: {reply}")
-                ctx = self.chat_context[channel_id]
-                ctx_authorka = message.author.name
-                ctx_authorka_id = message.author.id
-                input, cnt_ = self.input_fromatter(text=reply, context=ctx, author=ctx_authorka, author_id=ctx_authorka_id)
-                
-                reply_from_pipe = self.pipe(input, self.get_pipe(message.channel.id))
-                self.logger.info(f"\nCONTX: {cnt_}\nLMGEN: {reply_from_pipe}")
-                
-                if reply_from_pipe is not None:
-                    similarity = self.check_similarity(filtered_content, reply_from_pipe)
-                    print(f"similarity: {filtered_content}, {reply_from_pipe}, {similarity}")
-                    if similarity < 0.8:
-                        reply = reply_from_pipe
-                        reply = self.output_fromatter(reply)
-                        
-                    reply = self.harraq_filter.filter_content(reply)
-                    if SELF_CONTEXT:
-                        self.chat_context[channel_id].append(ctx_authorka_id, self.get_author(message), reply)
-                    self.logger.info(f"pipe output:::: {reply}")
-                    reply = self.specially_kanal_filter(message, reply)
+            reply_from_pipe = self.pipe(input, self.get_pipe(message.channel.id))
+            self.logger.info(f"\nCONTX: {cnt_}\nLMGEN: {reply_from_pipe}")
+            
+            if reply_from_pipe is not None:
+                similarity = self.check_similarity(filtered_content, reply_from_pipe)
+                print(f"similarity: {filtered_content}, {reply_from_pipe}, {similarity}")
+                if similarity < 0.8:
+                    reply = reply_from_pipe
+                    reply = self.output_fromatter(reply)
                     
-                if rep:
-                    await message.reply(reply)
-                else:
-                    await message.channel.send(reply)
-                    
+                if SELF_CONTEXT:
+                    self.chat_context[channel_id].append(797884527510290433, "hiranya", reply)
+                    #self.chat_context[channel_id].append(ctx_authorka_id, self.get_author(message), reply)
+                self.logger.info(f"pipe output:::: {reply}")
+                reply = self.specially_kanal_filter(message, reply)
+                
+            reply = self.harraq_filter.filter_content(reply)
+            await self.send_reply(reply, message, is_rep)
+
+    async def send_reply(self, reply, message, is_rep):
+        if is_rep:
+            reps = reply.split("<buferia>")
+            print(reps)
+            for r in reps:
+                await asyncio.sleep(random.randint(0,100)/500)
+                file = None
+                if "</att_pic>" in r:
+                    file = self.pick_random_image(r"M:\\mihm\\anticodka\\pix")
+                    r = r.replace("</att_pic>", "")
+                await message.reply(r, file=file)
+        else:
+            reps = reply.split("<buferia>")
+            print(reps)
+            for r in reps:
+                await asyncio.sleep(random.randint(0,100)/500)
+                file = None
+                if "</att_pic>" in r:
+                    file = self.pick_random_image(r"M:\mihm\anticodka\pix")
+                    r = r.replace("</att_pic>", "")
+                await message.channel.send(r, file=file)
+                
+    def pick_random_image(self, folder_path):
+        image_files = []
+
+        for root, dirs, files in os.walk(folder_path):
+            for file in files:
+                if file.lower().endswith(('.jpg', '.png')):
+                    image_files.append(os.path.join(root, file))
+
+        if not image_files:
+            raise FileNotFoundError("No .jpg or .png files found in the specified folder.")
+
+        random_image_path = random.choice(image_files)
+        return discord.File(random_image_path)
+
     async def on_message(self, message: discord.Message):
         _learn = False
         _store = False
@@ -776,15 +883,38 @@ class DiscordClient(discord.Client):
         if channel_id not in self.markov_topics:
             self.markov_topics[channel_id] = []
         self.markov_topics[channel_id].append(filtered_content)
+        self._pending_messages[channel_id] = message
 
-        if channel_id in self._channel_tasks and not self._channel_tasks[channel_id].done():
-            print(f"Task for channel {channel_id} is busy")
-            return
 
-        self._channel_tasks[channel_id] = asyncio.create_task(
-            self._on_message(message, filtered_content, _learn, _store, _reply)
-        )
+        if channel_id in self._channel_tasks and not self._channel_tasks[channel_id].done() and self._skipped_messages_count.get(channel_id, 0) < 5:
+            self._channel_tasks[channel_id].cancel()
         
+        # Create a new task to process the message after a delay
+        if message.channel.id not in self.badka and self._skipped_messages_count.get(channel_id, 0) < 5:
+            self._channel_tasks[channel_id] = asyncio.create_task(
+                self._process_message_after_delay(channel_id, message, filtered_content, _learn, _store, _reply)
+            )
+        
+    async def _process_message_after_delay(self, channel_id, message, filtered_content, _learn, _store, _reply):
+        curr = self._pending_messages[channel_id].content
+        try:
+            await asyncio.sleep(0.75)  # Wait for 1 second
+            if channel_id in self._pending_messages:
+                # If there's still a pending message, process it
+                last_message = self._pending_messages[channel_id]
+                del self._pending_messages[channel_id]
+                await self._on_message(last_message, filtered_content, _learn, _store, _reply)
+                self._skipped_messages_count[channel_id] = 0
+                self.logger.info(f"processed message {last_message.content}")
+                
+        except asyncio.CancelledError:
+            if not channel_id in self._skipped_messages_count:
+                self._skipped_messages_count[channel_id] = 1
+            self._skipped_messages_count[channel_id] += 1
+            # Handle task cancellation (optional)
+            self.logger.info(f"=======Task for channel {channel_id} was cancelled: msg {curr}")
+            raise
+            
     async def _on_message(self, message: discord.Message, filtered_content, _learn, _store, _reply):
        
         # Random Reply alzo d blocked list
@@ -827,7 +957,7 @@ class DiscordClient(discord.Client):
                     for mention in message.mentions:
                         if str(mention) == '797884527510290433':
                             rep = True
-                    await self.reply(message, filtered_content,  _learn, _reply, _store, rep=rep)
+                    await self.reply(message, filtered_content,  _learn, _reply, _store, is_rep=rep)
                 except Exception as e:
                     self.logger.error(str(e))
                     self.logger.error(traceback.format_exc())
